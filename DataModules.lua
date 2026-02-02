@@ -533,15 +533,21 @@ PP:RegisterDatatext("FPS/Ping", {
             end
         end)
 
-        slot:RegisterForClicks("LeftButtonUp")
+        --Click to open/close Graphics menu
+       slot:RegisterForClicks("LeftButtonUp")
         slot:SetScript("OnClick", function(self, button)
             self:SetPropagateMouseClicks(true)
 
             if button == "LeftButton" and not IsShiftKeyDown() then
                 if SettingsPanel:IsShown() then
-                    HideUIPanel(SettingsPanel) -- Standard secure way to close
+                    HideUIPanel(SettingsPanel)
                 else
-                    Settings.OpenToCategory(2)
+                    local graphicsCategory = Settings.GetCategory("Graphics")
+                    if graphicsCategory then
+                        Settings.OpenToCategory(graphicsCategory:GetID())
+                    else
+                        Settings.OpenToCategory(Settings.VIDEO_CATEGORY_ID)
+                    end
                 end
             end
         end)

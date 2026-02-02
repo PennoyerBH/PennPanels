@@ -1,14 +1,12 @@
-## Interface: 120000
-## Title: PennPanels
+## Interface: 110007, 120000
+## Title: PennPanels (Data Panels)
 ## Author: Pennoyer
-## Version 1.0
-## Notes: All Rights Reserved. Copyright © 2026 Pennoyer.
-## Notes: Standalone data panels for Guild, Friends, Time, FPS, and more.
-## X-License: GPLv3
-## X-Category: Interface Enhancements 
-
+## Version: 1.0.1
+## Notes: Standalone data panels for Guild, Friends, Time, FPS, and more. Released under GPLv3.
+## IconTexture: Interface\Icons\INV_Misc_Book_09
 ## SavedVariables: PennPanelsDB
-## Dependencies: Blizzard_Settings
+## X-License: GPLv3
+## X-Category: Interface Enhancements
 
 PennPanels.lua
 DataModules.lua
