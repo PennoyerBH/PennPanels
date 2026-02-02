@@ -36,37 +36,74 @@ function PP:RefreshPanel(panel)
     local id = panel.panelID
     local config = PennPanelsDB.panels[id]
     
-   if panel.slots then
-        for _, s in ipairs(panel.slots) do
-            s:SetScript("OnMouseDown", nil)
-            s:SetScript("OnClick", nil)
-            s:Hide()
-            s:SetParent(nil)
-        end
+    if panel.slots then
+        for _, s in ipairs(panel.slots) do s:Hide(); s:SetParent(nil) end
     end
     panel.slots = {}
 
     local num = #config.slots
     if num == 0 then return end
-    local width = config.width / num
+
+    -- 1. Measure text bulk
+    local totalTextWidth = 0
+    local visibleSlots = {}
 
     for i, dtID in ipairs(config.slots) do
         local slot = CreateFrame("Button", nil, panel)
-        slot:SetSize(width, config.height)
-        slot:SetPoint("LEFT", (i-1) * width, 0)
+        slot:SetHeight(config.height)
         slot:SetPropagateMouseClicks(true) 
         table.insert(panel.slots, slot)
 
         if PP.registry[dtID] then
             PP.registry[dtID].OnEnable(slot, config.fontSize or 12, config.fontType or "Fonts\\FRIZQT__.ttf", config.valueColor)
-        else
-            local t = slot:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-            t:SetFont(config.fontType or "Fonts\\FRIZQT__.ttf", config.fontSize or 12, "") 
-            t:SetPoint("CENTER")
-            t:SetText("|cffff0000?|r")
+            if slot.Update then slot.Update() end
+        end
+
+        local w = (slot.text and slot.text:GetStringWidth()) or 35
+        slot:SetWidth(w + 4)
+        totalTextWidth = totalTextWidth + (w + 4)
+        table.insert(visibleSlots, slot)
+    end
+
+    -- 2. THE CONDITIONAL JUSTIFICATION
+    if num == 2 then
+        -- MODE A: Justified Segments (For Guild/Friends bars)
+        -- Centers each module at 25% and 75% of the bar width
+        local segmentWidth = config.width / 2
+        for i, slot in ipairs(visibleSlots) do
+            slot:ClearAllPoints()
+            local centerX = (i - 0.5) * segmentWidth
+            slot:SetPoint("CENTER", panel, "LEFT", centerX, 0)
+            if slot.text then
+                slot.text:ClearAllPoints()
+                slot.text:SetPoint("CENTER", slot, "CENTER", 0, 0)
+                slot.text:SetJustifyH("CENTER")
+                slot.text:SetWidth(0)
+            end
+        end
+    else
+        -- MODE B: Clustered Group (For your 6-module Main bar)
+        -- This uses your 'Ideal Gap' math that keeps 'Time' pegged to the rock
+        local usableWidth = config.width - 40
+        local idealGap = (num > 1) and (usableWidth - totalTextWidth) / (num - 1) or 0
+        
+        -- Cap the gap so it doesn't push Time leftward
+        local finalGap = math.min(config.width * 0.15, idealGap)
+        local totalGroupWidth = totalTextWidth + (finalGap * (num - 1))
+        local currentX = (config.width - totalGroupWidth) / 2
+
+        for i, slot in ipairs(visibleSlots) do
+            slot:ClearAllPoints()
+            slot:SetPoint("LEFT", panel, "LEFT", currentX, 0)
+            if slot.text then
+                slot.text:ClearAllPoints()
+                slot.text:SetPoint("CENTER", slot, "CENTER", 0, 0)
+                slot.text:SetJustifyH("CENTER")
+                slot.text:SetWidth(0)
+            end
+            currentX = currentX + slot:GetWidth() + finalGap
         end
     end
-    panel:SetFrameLevel(10)
 end
 
 function PP:CreatePanel(id, config)
