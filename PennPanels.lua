@@ -47,6 +47,7 @@ function PP:RefreshPanel(panel)
     -- 1. Measure text bulk
     local totalTextWidth = 0
     local visibleSlots = {}
+    local slotWidths = {} 
 
     for i, dtID in ipairs(config.slots) do
         local slot = CreateFrame("Button", nil, panel)
@@ -59,20 +60,24 @@ function PP:RefreshPanel(panel)
             if slot.Update then slot.Update() end
         end
 
-        local w = (slot.text and slot.text:GetStringWidth()) or 35
-        slot:SetWidth(w + 4)
-        totalTextWidth = totalTextWidth + (w + 4)
+        -- Sets minimum "hitbox" to a module for easier left clicking of smaller modules like Time
+        local textW = (slot.text and slot.text:GetStringWidth()) or 35
+        local hitboxW = math.max(50, textW + 10) 
+        
+        slot:SetWidth(hitboxW)
+        slotWidths[i] = hitboxW
+        totalTextWidth = totalTextWidth + hitboxW
         table.insert(visibleSlots, slot)
     end
 
-    -- 2. THE CONDITIONAL JUSTIFICATION
+    -- 2. Spacing the text of modules
     if num == 2 then
-        -- MODE A: Justified Segments (For Guild/Friends bars)
-        -- Centers each module at 25% and 75% of the bar width
+        -- MODE A: Quadrant Centering (Generally for panels with only 2 modules)
         local segmentWidth = config.width / 2
         for i, slot in ipairs(visibleSlots) do
             slot:ClearAllPoints()
             local centerX = (i - 0.5) * segmentWidth
+            slot:SetWidth(segmentWidth) -- Fills half the bar for easy clicking
             slot:SetPoint("CENTER", panel, "LEFT", centerX, 0)
             if slot.text then
                 slot.text:ClearAllPoints()
@@ -82,26 +87,26 @@ function PP:RefreshPanel(panel)
             end
         end
     else
-        -- MODE B: Clustered Group (For your 6-module Main bar)
-        -- This uses your 'Ideal Gap' math that keeps 'Time' pegged to the rock
-        local usableWidth = config.width - 40
+        -- MODE B: Proportional Clustering (Usually for panels with 3 or more modules)
+        local usableWidth = config.width - 30
         local idealGap = (num > 1) and (usableWidth - totalTextWidth) / (num - 1) or 0
         
-        -- Cap the gap so it doesn't push Time leftward
-        local finalGap = math.min(config.width * 0.15, idealGap)
+        -- Prevent gaps from becoming too massive
+        local finalGap = math.min(40, idealGap)
         local totalGroupWidth = totalTextWidth + (finalGap * (num - 1))
         local currentX = (config.width - totalGroupWidth) / 2
 
         for i, slot in ipairs(visibleSlots) do
             slot:ClearAllPoints()
             slot:SetPoint("LEFT", panel, "LEFT", currentX, 0)
+            
             if slot.text then
                 slot.text:ClearAllPoints()
                 slot.text:SetPoint("CENTER", slot, "CENTER", 0, 0)
                 slot.text:SetJustifyH("CENTER")
                 slot.text:SetWidth(0)
             end
-            currentX = currentX + slot:GetWidth() + finalGap
+            currentX = currentX + slotWidths[i] + finalGap
         end
     end
 end
@@ -251,10 +256,10 @@ f:SetScript("OnEvent", function(self, event, name)
         end
     end)
 
-    local widthSliderOptions = Settings.CreateSliderOptions(100, 1000, 1)
-    widthSliderOptions:SetLabelFormatter(MinimalSliderWithSteppersMixin.Label.Right)
-    Settings.CreateSlider(category, widthSetting, widthSliderOptions, "Adjust width in increments of 1 (Max 800)")
-end
+        local widthSliderOptions = Settings.CreateSliderOptions(100, 1000, 1)
+        widthSliderOptions:SetLabelFormatter(MinimalSliderWithSteppersMixin.Label.Right)
+        Settings.CreateSlider(category, widthSetting, widthSliderOptions, "Adjust width in increments of 1 (Max 800)")
+    end
 
         -- 3. HEIGHT SLIDERS
         Settings.CreateElementInitializer("SettingsListSectionHeaderTemplate", {name = "Panel Heights"})

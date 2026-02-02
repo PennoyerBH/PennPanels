@@ -220,6 +220,7 @@ PP:RegisterDatatext("Gold", {
             GameTooltip:AddLine("|cff00ffffLeft-click|r to open/close the Currency tab", 0.5, 0.5, 0.5)
             GameTooltip:Show()
         end)
+         slot:SetScript("OnLeave", function() GameTooltip:Hide() end)
     end
 })
 
@@ -538,8 +539,7 @@ PP:RegisterDatatext("FPS/Ping", {
 
             if button == "LeftButton" and not IsShiftKeyDown() then
                 if SettingsPanel:IsShown() then
-                    -- When left clicking to close Graphics options, the Escape menu remains "hidden" and the game acts like it's open (can't click some other things). This clears that hidden Escape menu.
-                    HideUIPanel(SettingsPanel)
+                    HideUIPanel(SettingsPanel) -- Standard secure way to close
                 else
                     Settings.OpenToCategory(4)
                 end
@@ -568,7 +568,7 @@ PP:RegisterDatatext("Durability", {
             
             local percent = (total > 0) and floor((current / total) * 100) or 100
             
-            -- Determine Color based on four-stage thresholds
+            -- Determine Color based on durability level
             local colorStr
             if percent >= 75 then
                 colorStr = "00ff00" -- Green (75%+)
@@ -601,7 +601,7 @@ PP:RegisterDatatext("Durability", {
             GameTooltip:AddLine("|cff00ffffLeft-click|r to open/close the Character panel", 0.5, 0.5, 0.5)
             GameTooltip:Show()
         end)
-        
+    
         slot:SetScript("OnLeave", function() GameTooltip:Hide() end)
     end
 })
@@ -729,8 +729,24 @@ PP:RegisterDatatext("Talent Loadout", {
         end)
         slot:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-        -- Left click opens the talent pane
-        MakeClickable(slot, function() TogglePlayerSpellsFrame() end)
+        --Open Talents on Left click
+   MakeClickable(slot, function() 
+    local TALENT_TAB_INDEX = 2 
+    
+    -- If the frame is not even loaded, load it securely to the talent tab
+    if not PlayerSpellsFrame then
+        TogglePlayerSpellsFrame(TALENT_TAB_INDEX)
+    else
+        -- If already open on the talent tab, close it securely
+        if PlayerSpellsFrame:IsShown() and (PlayerSpellsFrame.GetTab and PlayerSpellsFrame:GetTab() == TALENT_TAB_INDEX) then
+            TogglePlayerSpellsFrame(TALENT_TAB_INDEX)
+        else
+            -- If closed or on another tab, open/switch to talents securely
+            ShowUIPanel(PlayerSpellsFrame)
+            PlayerSpellsFrame:SetTab(TALENT_TAB_INDEX)
+        end
+    end
+end)
         
         Update()
     end
@@ -787,14 +803,12 @@ PP:RegisterDatatext("Volume", {
         end)
 
        slot:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-        slot:SetScript("OnClick", function(self, button)
-            -- Reset propagation so the background panel stays healthy
+       slot:SetScript("OnClick", function(self, button)
             self:SetPropagateMouseClicks(true)
 
             if button == "LeftButton" and not IsShiftKeyDown() then
                 if SettingsPanel:IsShown() then
-                    -- Closes the hidden WoW Escape menu when Left clicking to close the Sound settings. Otherwise, other actions may get blocked because WoW thinks its Escape menu is still open.
-                    HideUIPanel(SettingsPanel)
+                    HideUIPanel(SettingsPanel) -- Standard secure way to close
                 else
                     Settings.OpenToCategory(Settings.AUDIO_CATEGORY_ID)
                 end
