@@ -8,6 +8,9 @@ ns.PP = ns.PP or {}
 local PP = ns.PP
 PP.registry = PP.registry or {}
 
+local visibleSlots = {}
+local slotWidths = {}
+
 local BackdropTemplate = BackdropTemplateMixin and "BackdropTemplate" or nil
 
 function PP:RegisterDatatext(id, definition)
@@ -27,40 +30,43 @@ local defaults = {
         }
     }
 }
+
 -----------------------------------------------------------------
 -- Drawing the Panel, Moving Panel, Right Click Options
 -----------------------------------------------------------------
 
-function PP:RefreshPanel(panel)
+function PP:RefreshPanel(panel, skipEnable)
     if not panel or not panel.panelID then return end
     local id = panel.panelID
     local config = PennPanelsDB.panels[id]
     
-    if panel.slots then
-        for _, s in ipairs(panel.slots) do s:Hide(); s:SetParent(nil) end
-    end
-    panel.slots = {}
-
+    panel.slots = panel.slots or {}
     local num = #config.slots
-    if num == 0 then return end
-
-    -- 1. Measure text bulk
+    
+    -- 1. Initial Setup and Measurement
     local totalTextWidth = 0
-    local visibleSlots = {}
-    local slotWidths = {} 
+    wipe(visibleSlots) -- Reuse static table
+    wipe(slotWidths)   -- Reuse static table
 
     for i, dtID in ipairs(config.slots) do
-        local slot = CreateFrame("Button", nil, panel)
-        slot:SetHeight(config.height)
-        slot:SetPropagateMouseClicks(true) 
-        table.insert(panel.slots, slot)
-
-        if PP.registry[dtID] then
-            PP.registry[dtID].OnEnable(slot, config.fontSize or 12, config.fontType or "Fonts\\FRIZQT__.ttf", config.valueColor)
-            if slot.Update then slot.Update() end
+        local slot = panel.slots[i]
+        if not slot then
+            slot = CreateFrame("Button", nil, panel)
+            panel.slots[i] = slot
         end
 
-        -- Sets minimum "hitbox" to a module for easier left clicking of smaller modules like Time
+        slot:SetParent(panel)
+        slot:Show()
+        slot:SetHeight(config.height)
+
+       -- Only run OnEnable if we aren't just resizing the bar
+        if not skipEnable and PP.registry[dtID] then
+            slot:UnregisterAllEvents() -- Changed 's' to 'slot'
+            slot:SetScript("OnEvent", nil)
+            slot:SetScript("OnUpdate", nil)
+            PP.registry[dtID].OnEnable(slot, config.fontSize or 12, config.fontType or "Fonts\\FRIZQT__.ttf", config.valueColor)
+        end
+
         local textW = (slot.text and slot.text:GetStringWidth()) or 35
         local hitboxW = math.max(50, textW + 10) 
         
@@ -70,41 +76,34 @@ function PP:RefreshPanel(panel)
         table.insert(visibleSlots, slot)
     end
 
-    -- 2. Spacing the text of modules
+    -- Hide orphaned slots from previous larger configurations
+    for i = num + 1, #panel.slots do
+        panel.slots[i]:Hide()
+    end
+
+    -- 2. Layout Logic
     if num == 2 then
-        -- MODE A: Quadrant Centering (Generally for panels with only 2 modules)
         local segmentWidth = config.width / 2
         for i, slot in ipairs(visibleSlots) do
             slot:ClearAllPoints()
-            local centerX = (i - 0.5) * segmentWidth
-            slot:SetWidth(segmentWidth) -- Fills half the bar for easy clicking
-            slot:SetPoint("CENTER", panel, "LEFT", centerX, 0)
+            slot:SetWidth(segmentWidth) 
+            slot:SetPoint("CENTER", panel, "LEFT", (i - 0.5) * segmentWidth, 0)
             if slot.text then
                 slot.text:ClearAllPoints()
                 slot.text:SetPoint("CENTER", slot, "CENTER", 0, 0)
-                slot.text:SetJustifyH("CENTER")
-                slot.text:SetWidth(0)
             end
         end
     else
-        -- MODE B: Proportional Clustering (Usually for panels with 3 or more modules)
         local usableWidth = config.width - 30
-        local idealGap = (num > 1) and (usableWidth - totalTextWidth) / (num - 1) or 0
-        
-        -- Prevent gaps from becoming too massive
-        local finalGap = math.min(40, idealGap)
-        local totalGroupWidth = totalTextWidth + (finalGap * (num - 1))
-        local currentX = (config.width - totalGroupWidth) / 2
+        local finalGap = math.min(40, (num > 1) and (usableWidth - totalTextWidth) / (num - 1) or 0)
+        local currentX = (config.width - (totalTextWidth + (finalGap * (num - 1)))) / 2
 
         for i, slot in ipairs(visibleSlots) do
             slot:ClearAllPoints()
             slot:SetPoint("LEFT", panel, "LEFT", currentX, 0)
-            
             if slot.text then
                 slot.text:ClearAllPoints()
                 slot.text:SetPoint("CENTER", slot, "CENTER", 0, 0)
-                slot.text:SetJustifyH("CENTER")
-                slot.text:SetWidth(0)
             end
             currentX = currentX + slotWidths[i] + finalGap
         end
@@ -247,19 +246,20 @@ f:SetScript("OnEvent", function(self, event, name)
         for panelID, config in pairs(PennPanelsDB.panels) do
             local widthSetting = Settings.RegisterAddOnSetting(category, "PP_Width_"..panelID, "width", config, Settings.VarType.Number, "Width: "..panelID, 300)
             widthSetting:SetValueChangedCallback(function(setting, value)
-               if not PennPanelsDB.panels[panelID] then return end 
-               config.width = value 
-               local panelFrame = _G["PP_Panel_"..panelID]
-          if panelFrame then 
-            panelFrame:SetWidth(value) 
-            PP:RefreshPanel(panelFrame) 
-        end
-    end)
+                if not PennPanelsDB.panels[panelID] then return end 
+                config.width = value 
+                local panelFrame = _G["PP_Panel_"..panelID]
+                if panelFrame then 
+                    panelFrame:SetWidth(value) 
+                    -- FIX: Pass 'true' to skip module re-initialization
+                    PP:RefreshPanel(panelFrame, true) 
+                end
+            end)
 
-        local widthSliderOptions = Settings.CreateSliderOptions(100, 1000, 1)
-        widthSliderOptions:SetLabelFormatter(MinimalSliderWithSteppersMixin.Label.Right)
-        Settings.CreateSlider(category, widthSetting, widthSliderOptions, "Adjust width in increments of 1 (Max 800)")
-    end
+            local widthSliderOptions = Settings.CreateSliderOptions(100, 1000, 1)
+            widthSliderOptions:SetLabelFormatter(MinimalSliderWithSteppersMixin.Label.Right)
+            Settings.CreateSlider(category, widthSetting, widthSliderOptions, "Adjust width in increments of 1 (Max 800)")
+        end
 
         -- 3. HEIGHT SLIDERS
         Settings.CreateElementInitializer("SettingsListSectionHeaderTemplate", {name = "Panel Heights"})
@@ -268,7 +268,11 @@ f:SetScript("OnEvent", function(self, event, name)
             heightSetting:SetValueChangedCallback(function(setting, value)
                 config.height = value 
                 local panelFrame = _G["PP_Panel_"..panelID]
-                if panelFrame then panelFrame:SetHeight(value); PP:RefreshPanel(panelFrame) end
+                if panelFrame then 
+                    panelFrame:SetHeight(value)
+                    -- FIX: Pass 'true' to skip module re-initialization
+                    PP:RefreshPanel(panelFrame, true) 
+                end
             end)
             local heightSliderOptions = Settings.CreateSliderOptions(10, 100, 1)
             heightSliderOptions:SetLabelFormatter(MinimalSliderWithSteppersMixin.Label.Right)

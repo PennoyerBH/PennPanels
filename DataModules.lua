@@ -613,6 +613,8 @@ PP:RegisterDatatext("Durability", {
 })
 
 -- 8. ADDON MEMORY & CPU
+local addonPerformanceTable = {}
+
 PP:RegisterDatatext("Memory/CPU", {
     OnEnable = function(slot, fontSize, fontType)
         local text = slot.text or slot:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -622,7 +624,7 @@ PP:RegisterDatatext("Memory/CPU", {
         
         local function Update()
             UpdateAddOnMemoryUsage()
-            local mem = GetAddOnMemoryUsage(addonName)
+            local mem = GetAddOnMemoryUsage("PennPanels") -- Using hardcoded string for stability
             if mem > 1024 then
                 text:SetFormattedText("Mem: %.2f mb", mem / 1024)
             else
@@ -635,29 +637,33 @@ PP:RegisterDatatext("Memory/CPU", {
             GameTooltip:ClearLines()
             GameTooltip:AddDoubleLine("Addon Performance", "(CPU/Mem)", 0, 1, 1, 0.5, 0.5, 0.5)
             GameTooltip:AddLine(" ")
+            
             UpdateAddOnMemoryUsage()
             UpdateAddOnCPUUsage()
-            local addons = {}
+            
+            wipe(addonPerformanceTable)
             for i = 1, C_AddOns.GetNumAddOns() do
                 if C_AddOns.IsAddOnLoaded(i) then
                     local name = C_AddOns.GetAddOnInfo(i)
-                    local mem = GetAddOnMemoryUsage(i)
-                    local cpu = GetAddOnCPUUsage(i)
-                    table.insert(addons, {name = name, mem = mem, cpu = cpu})
+                    table.insert(addonPerformanceTable, {
+                        name = name, 
+                        mem = GetAddOnMemoryUsage(i), 
+                        cpu = GetAddOnCPUUsage(i)
+                    })
                 end
             end
-            table.sort(addons, function(a, b) return a.cpu > b.cpu end)
-            for i = 1, math.min(#addons, 15) do
-                local a = addons[i]
+            
+            table.sort(addonPerformanceTable, function(a, b) return a.cpu > b.cpu end)
+            
+            for i = 1, math.min(#addonPerformanceTable, 15) do
+                local a = addonPerformanceTable[i]
                 local memStr = a.mem > 1024 and string.format("%.1fmb", a.mem / 1024) or string.format("%.0fkb", a.mem)
-                local cpuStr = string.format("%.1fms", a.cpu)
                 local cpuCol = a.cpu > 50 and "|cffff0000" or "|cffffffff"
-                GameTooltip:AddDoubleLine(a.name, cpuCol..cpuStr.." |r|cffaaaaaa("..memStr..")|r")
+                GameTooltip:AddDoubleLine(a.name, string.format("%s%.1fms|r |cffaaaaaa(%.1fmb)|r", cpuCol, a.cpu, a.mem/1024))
             end
+            
             GameTooltip:AddLine(" ")
             GameTooltip:AddLine("|cff00ffffLeft-click|r to collect garbage", 0.5, 0.5, 0.5)
-            GameTooltip:AddLine("For CPU Usage, use |cff00ff00/console scriptProfile 1|r and |cff00ff00reload|r. Use |cff00ff000|r to disable again.", 0.5, 0.5, 0.5)
-            GameTooltip:AddLine("|cffff00ffCPU Profiling may affect game performance.|r", 0.5, 0.5, 0.5)
             GameTooltip:Show()
         end)
 
@@ -666,12 +672,11 @@ PP:RegisterDatatext("Memory/CPU", {
         slot:SetScript("OnMouseDown", function(self, button)
             if button == "LeftButton" then
                 collectgarbage("collect")
-                Update()
                 print("|cff00ffffPennPanels:|r Memory garbage collected.")
             end
         end)
 
-        if not slot.ticker then slot.ticker = C_Timer.NewTicker(15, Update) end
+        slot.ticker = C_Timer.NewTicker(15, Update)
         Update()
     end
 })
