@@ -6,7 +6,7 @@ Create new panel:
 
 You need to /reload to see the options for a new panel
 
-Name the panel (e.g. /pp new Bottom Panel) so it is easier to track it in options. Typing only "/pp new" will assign a random number to the panel.
+*NOTE: Name the panel (e.g. /pp new Bottom Panel) so it is easier to track it in options. Typing only "/pp new" will assign a random number to the panel.
 The options panel is very rudimentary right now as I anticipate people will only make 1-2 panels, so it should be sufficient for this purpose.
 
 Move panel:
