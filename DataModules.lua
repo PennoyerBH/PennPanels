@@ -541,7 +541,7 @@ PP:RegisterDatatext("FPS/Ping", {
                 if SettingsPanel:IsShown() then
                     HideUIPanel(SettingsPanel) -- Standard secure way to close
                 else
-                    Settings.OpenToCategory(4)
+                    Settings.OpenToCategory(2)
                 end
             end
         end)
