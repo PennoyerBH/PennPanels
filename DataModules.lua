@@ -495,6 +495,7 @@ PP:RegisterDatatext("Bags", {
             GameTooltip:AddLine("|cff00ffffLeft-click|r to open/close Bags", 0.5, 0.5, 0.5)
             GameTooltip:Show()
         end)
+        slot:SetScript("OnLeave", function() GameTooltip:Hide() end)
     end
 
     
@@ -804,5 +805,68 @@ PP:RegisterDatatext("Volume", {
             end
         end)
         Update()
+    end
+})
+
+-- 11. COORDINATES
+PP:RegisterDatatext("Coordinates", {
+    OnEnable = function(slot, fontSize, fontType)
+        local text = slot.text or slot:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        slot.text = text
+        text:SetPoint("CENTER")
+        ApplySettings(text, fontSize, fontType)
+
+        local function Update()
+            local mapID = C_Map.GetBestMapForUnit("player")
+            
+            if mapID then
+                local pos = C_Map.GetPlayerMapPosition(mapID, "player")
+                if pos and pos.GetXY then
+                    local x, y = pos:GetXY()
+                    if x and y then
+                        -- Formatting to two decimal places (e.g., 45, 12)
+                        text:SetFormattedText("|cffffff00Coords:|r %d, %d", x * 100, y * 100)
+                        return
+                    end
+                end
+            end
+            -- Fallback for instances or unmapped areas
+            text:SetText("|cffffff00Coords:|r --, --")
+        end
+
+        -- Update every 0.5 seconds for smooth movement tracking
+        slot.ticker = C_Timer.NewTicker(0.5, Update)
+
+        -- Tooltip setup
+        slot:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:ClearLines()
+            GameTooltip:AddLine("Coordinates", 1, 1, 1)
+            GameTooltip:AddLine(GetZoneText() or "Unknown Zone", 1, 0.82, 0)
+            
+            local subzone = GetSubZoneText()
+            if subzone and subzone ~= "" then
+                GameTooltip:AddLine(subzone, 0.7, 0.7, 0.7)
+            end
+            
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine("|cff00ffffLeft-click|r to open/close World Map", 0.5, 0.5, 0.5)
+            GameTooltip:Show()
+        end)
+        slot:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+        -- Click to open Map
+        slot:SetScript("OnClick", function()
+            ToggleWorldMap()
+        end)
+
+        Update()
+    end,
+    
+    OnDisable = function(slot)
+        if slot.ticker then
+            slot.ticker:Cancel()
+            slot.ticker = nil
+        end
     end
 })
