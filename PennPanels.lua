@@ -59,12 +59,22 @@ function PP:RefreshPanel(panel, skipEnable)
         slot:Show()
         slot:SetHeight(config.height)
 
-       -- Only run OnEnable if we aren't just resizing the bar
-        if not skipEnable and PP.registry[dtID] then
-            slot:UnregisterAllEvents() -- Changed 's' to 'slot'
-            slot:SetScript("OnEvent", nil)
-            slot:SetScript("OnUpdate", nil)
-            PP.registry[dtID].OnEnable(slot, config.fontSize or 12, config.fontType or "Fonts\\FRIZQT__.ttf", config.valueColor)
+       -- Apply font/size settings even during a skipEnable refresh
+        if PP.registry[dtID] then
+            if not skipEnable then
+                -- Full restart: Clear scripts and events
+                slot:UnregisterAllEvents()
+                slot:SetScript("OnEvent", nil)
+                slot:SetScript("OnUpdate", nil)
+                PP.registry[dtID].OnEnable(slot, config.fontSize or 12, config.fontType or "Fonts\\FRIZQT__.ttf", config.valueColor)
+            else
+                -- Layout Only: Just update the font size/style visually
+                if slot.text then
+                    local fontPath = config.fontType or "Interface\\AddOns\\PennPanels\\Fonts\\ARIALN.ttf"
+                    local _, _, flags = slot.text:GetFont()
+                    slot.text:SetFont(fontPath, config.fontSize or 12, flags or "")
+                end
+            end
         end
 
         local textW = (slot.text and slot.text:GetStringWidth()) or 35
@@ -234,7 +244,8 @@ f:SetScript("OnEvent", function(self, event, name)
             fontSetting:SetValueChangedCallback(function(setting, value)
                 config.fontSize = value
                 local panelFrame = _G["PP_Panel_"..panelID]
-                if panelFrame then PP:RefreshPanel(panelFrame) end
+                --Pass 'true' to recalculate hitboxes without restarting tickers
+                if panelFrame then PP:RefreshPanel(panelFrame, true) end
             end)
             local fontSliderOptions = Settings.CreateSliderOptions(8, 24, 1)
             fontSliderOptions:SetLabelFormatter(MinimalSliderWithSteppersMixin.Label.Right)
@@ -251,7 +262,7 @@ f:SetScript("OnEvent", function(self, event, name)
                 local panelFrame = _G["PP_Panel_"..panelID]
                 if panelFrame then 
                     panelFrame:SetWidth(value) 
-                    -- FIX: Pass 'true' to skip module re-initialization
+                    --Pass 'true' to skip module re-initialization
                     PP:RefreshPanel(panelFrame, true) 
                 end
             end)
@@ -270,7 +281,7 @@ f:SetScript("OnEvent", function(self, event, name)
                 local panelFrame = _G["PP_Panel_"..panelID]
                 if panelFrame then 
                     panelFrame:SetHeight(value)
-                    -- FIX: Pass 'true' to skip module re-initialization
+                    --Pass 'true' to skip module re-initialization
                     PP:RefreshPanel(panelFrame, true) 
                 end
             end)
@@ -317,26 +328,25 @@ f:SetScript("OnEvent", function(self, event, name)
         end
 
       -- 5. OPACITY SLIDERS
-        Settings.CreateElementInitializer("SettingsListSectionHeaderTemplate", {name = "Panel Opacity"})
-        for panelID, config in pairs(PennPanelsDB.panels) do
-            config.alpha = config.alpha or 1.0
-            local alphaSetting = Settings.RegisterAddOnSetting(category, "PP_Alpha_"..panelID, "alpha", config, Settings.VarType.Number, "Opacity: "..panelID, 1.0)
-            
-            alphaSetting:SetValueChangedCallback(function(setting, value)
-                config.alpha = value 
-                local panelFrame = _G["PP_Panel_"..panelID]
-                if panelFrame and panelFrame.bg then 
-                    panelFrame.bg:SetVertexColor(0, 0, 0, value) 
-                end
-            end)
-
-            local alphaSliderOptions = Settings.CreateSliderOptions(0.1, 1.0, 0.05)
-            alphaSliderOptions:SetLabelFormatter(function(value)
-                return "" 
-            end)
-
-            Settings.CreateSlider(category, alphaSetting, alphaSliderOptions, "Adjust background opacity")
+    Settings.CreateElementInitializer("SettingsListSectionHeaderTemplate", {name = "Panel Opacity"})
+    for panelID, config in pairs(PennPanelsDB.panels) do
+    config.alpha = config.alpha or 1.0
+    local alphaSetting = Settings.RegisterAddOnSetting(category, "PP_Alpha_"..panelID, "alpha", config, Settings.VarType.Number, "Opacity: "..panelID, 1.0)
+    
+    alphaSetting:SetValueChangedCallback(function(setting, value)
+        config.alpha = value 
+        local panelFrame = _G["PP_Panel_"..panelID]
+        if panelFrame and panelFrame.bg then 
+            panelFrame.bg:SetVertexColor(0, 0, 0, value)
+            --Pass 'true' to keep layout stable without restarting modules
+            PP:RefreshPanel(panelFrame, true) 
         end
+    end)
+
+    local alphaSliderOptions = Settings.CreateSliderOptions(0.1, 1.0, 0.05)
+    alphaSliderOptions:SetLabelFormatter(function(value) return "" end)
+    Settings.CreateSlider(category, alphaSetting, alphaSliderOptions, "Adjust background opacity")
+    end
 
     --  6. INSTRUCTIONS / HELP TEXT 
         Settings.CreateElementInitializer("SettingsListSectionHeaderTemplate", {name = "PennPanels Commands & Help"})

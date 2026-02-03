@@ -533,8 +533,8 @@ PP:RegisterDatatext("FPS/Ping", {
             end
         end)
 
-        --Click to open/close Graphics menu
-       slot:RegisterForClicks("LeftButtonUp")
+        -- Click to open/close Graphics menu
+        slot:RegisterForClicks("LeftButtonUp")
         slot:SetScript("OnClick", function(self, button)
             self:SetPropagateMouseClicks(true)
 
@@ -542,12 +542,8 @@ PP:RegisterDatatext("FPS/Ping", {
                 if SettingsPanel:IsShown() then
                     HideUIPanel(SettingsPanel)
                 else
-                    local graphicsCategory = Settings.GetCategory("Graphics")
-                    if graphicsCategory then
-                        Settings.OpenToCategory(graphicsCategory:GetID())
-                    else
-                        Settings.OpenToCategory(Settings.VIDEO_CATEGORY_ID)
-                    end
+                    -- Using the official Video/Graphics constant
+                    Settings.OpenToCategory(Settings.GRAPHICS_CATEGORY_ID)
                 end
             end
         end)
