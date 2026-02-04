@@ -11,7 +11,7 @@ local function ApplySettings(textString, fontSize, fontType)
     if not textString then return end
     local db = PennPanelsDB or { textColor = {r=1, g=1, b=1} }
     
-    local fontPath = fontType or "Interface\\AddOns\\PennPanels\\Fonts\\Standard.ttf"
+    local fontPath = fontType or "Fonts\\FRIZQT__.ttf"
     local _, _, fontFlags = textString:GetFont()
     
     textString:SetText("")
@@ -20,7 +20,7 @@ local function ApplySettings(textString, fontSize, fontType)
     
     local currentFont = textString:GetFont()
     if not currentFont then
-        textString:SetFont("Fonts\\FRIZQT__.TTF", fontSize or 12, fontFlags or "")
+        textString:SetFont("Fonts\\FRIZQT__.ttf", fontSize or 12, fontFlags or "")
     end
     
     if db.textColor then
@@ -33,12 +33,16 @@ local function GetHexColor(colorTable)
     return string.format("ff%02x%02x%02x", c.r*255, c.g*255, c.b*255)
 end
 
--- Strictly filter for LeftButton to prevent overlapping with the right-click menu
+--Registers Right Click to trigger Panel Menu for "Simple" modules
 local function MakeClickable(slot, func)
     slot:EnableMouse(true)
-    slot:SetScript("OnMouseDown", function(self, button)
+    slot:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    slot:SetScript("OnClick", function(self, button)
         if button == "LeftButton" and not IsShiftKeyDown() then 
             func() 
+        elseif button == "RightButton" then
+            -- Trigger Panel Menu on right click since this module has no right-click function
+            ns.PP:OpenPanelMenu(self:GetParent())
         end
     end)
 end
@@ -126,7 +130,6 @@ PP:RegisterDatatext("Time", {
         text:SetPoint("CENTER")
         ApplySettings(text, fontSize, fontType)
 
-        -- Helper to format seconds into "Xd Xh Xm"
         local function FormatTime(seconds)
             if not seconds or seconds <= 0 then return "0m" end
             local days = math.floor(seconds / 86400)
@@ -137,44 +140,33 @@ PP:RegisterDatatext("Time", {
             else return string.format("%dm", minutes) end
         end
 
-        --Only update the UI text when the minute changes
         local lastMinute = -1
         local function Update()
-            local currentTime = date("*t") -- Gets local table: hour, min, sec, etc.
-            
+            local currentTime = date("*t")
             if currentTime.min ~= lastMinute then
                 local h = currentTime.hour
                 local m = currentTime.min
                 local suffix = (h >= 12) and "pm" or "am"
-                
                 h = h % 12
                 if h == 0 then h = 12 end
-                
                 text:SetFormattedText("%d:%02d%s", h, m, suffix)
                 lastMinute = m
             end
         end
 
-        -- Tooltip: Reset Timers and Server Time
         slot:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
             GameTooltip:ClearLines()
             GameTooltip:AddLine("Schedule", 1, 1, 1)
             GameTooltip:AddLine(" ")
-
-            -- 1. Daily Reset
             local dailyReset = C_DateAndTime.GetSecondsUntilDailyReset()
             if dailyReset and dailyReset > 0 then
                 GameTooltip:AddDoubleLine("Daily Reset", FormatTime(dailyReset), 0.8, 0.8, 0.8, 1, 1, 1)
             end
-
-            -- 2. Weekly Reset
             local weeklyReset = C_DateAndTime.GetSecondsUntilWeeklyReset()
             if weeklyReset and weeklyReset > 0 then
                 GameTooltip:AddDoubleLine("Weekly Reset", FormatTime(weeklyReset), 0.8, 0.8, 0.8, 1, 1, 1)
             end
-
-            -- 3. Server Time
             GameTooltip:AddLine(" ")
             GameTooltip:AddDoubleLine("Server Time", GameTime_GetGameTime(true), 0.8, 0.8, 0.8, 1, 1, 1)
             GameTooltip:AddLine(" ")
@@ -183,15 +175,8 @@ PP:RegisterDatatext("Time", {
         end)
 
         slot:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
-        -- Check every 3s for the minute flip
         if not slot.ticker then slot.ticker = C_Timer.NewTicker(3, Update) end
-        
-        -- Calendar opens on click
-        MakeClickable(slot, function() 
-            ToggleCalendar() 
-        end)
-        
+        MakeClickable(slot, function() ToggleCalendar() end)
         C_Timer.After(0.01, Update)
     end
 })
@@ -211,9 +196,8 @@ PP:RegisterDatatext("Gold", {
         slot:SetScript("OnEvent", Update)
         MakeClickable(slot, function() ToggleCharacter("TokenFrame") end)
         Update()
-        C_Timer.After(2, Update) --fixes bug showing 0g on logging in
+        C_Timer.After(2, Update) 
 
-         -- Tooltip to inform the user of the click action
         slot:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
             GameTooltip:ClearLines()
@@ -244,7 +228,6 @@ PP:RegisterDatatext("Friends", {
             GameTooltip:ClearLines()
             GameTooltip:AddLine("Friends List", 1, 1, 1)
 
-
             if #friendsCache.bnetRetail > 0 or #friendsCache.wowFriends > 0 then
                 GameTooltip:AddLine(" ")
                 GameTooltip:AddLine("World of Warcraft (Retail)", 1, 1, 1)
@@ -261,7 +244,6 @@ PP:RegisterDatatext("Friends", {
                     GameTooltip:AddDoubleLine(f.characterName .. inGroup .. " ("..f.accountName..")" .. status, f.zone, color.r, color.g, color.b, 0.7, 0.7, 0.7)
                 end
             end
-
             if #friendsCache.bnetClassic > 0 then
                 GameTooltip:AddLine(" ")
                 GameTooltip:AddLine("World of Warcraft (Classic)", 1, 0.8, 0)
@@ -273,7 +255,6 @@ PP:RegisterDatatext("Friends", {
                     GameTooltip:AddDoubleLine(leftText, f.zone or "Unknown", 1, 1, 1, 0.7, 0.7, 0.7)
                 end
             end
-
             if #friendsCache.bnetOther > 0 then
                 GameTooltip:AddLine(" ")
                 GameTooltip:AddLine("Other Games", 0.5, 0.5, 0.5)
@@ -281,12 +262,11 @@ PP:RegisterDatatext("Friends", {
                     local status = f.afk and "|cffFFFF00 {AFK}|r" or f.dnd and "|cffFF0000 {DND}|r" or ""
                     GameTooltip:AddDoubleLine(f.accountName .. status, f.richPresence, 0.8, 0.8, 0.8, 0.5, 0.5, 0.5)
                 end
+            end
             GameTooltip:AddLine(" ")
             GameTooltip:AddLine("|cff00ffffLeft-click|r to open/close Friends panel", 0.7, 0.7, 0.7)
             GameTooltip:AddLine("|cff00ffffRight-click|r for Whisper/Invite Menu", 0.7, 0.7, 0.7)
-            GameTooltip:AddLine("|cff00ffffHOLD Right-click|r for Options", 0.7, 0.7, 0.7)
-            end
-
+            GameTooltip:AddLine("|cff00ffffALT + Right-click|r for Panel Options", 0.7, 0.7, 0.7)
             GameTooltip:Show()
         end)
 
@@ -301,24 +281,20 @@ PP:RegisterDatatext("Friends", {
             Update()
         end)
 
-        -- Shield the background panel during right-clicks to prevent the Options menu from popping
-        slot:SetScript("OnMouseDown", function(self, button)
-            if button == "RightButton" or button == "Button4" then
-                self:SetPropagateMouseClicks(false)
-            end
-        end)
-
         slot:RegisterForClicks("LeftButtonUp", "RightButtonUp", "Button4Up") 
         slot:SetScript("OnClick", function(self, button)
-            self:SetPropagateMouseClicks(true)
-
             if button == "LeftButton" then
                   ToggleFriendsFrame(1) 
             elseif button == "RightButton" or button == "Button4" then
+                -- ALT+RightClick opens Panel Menu
+                if IsAltKeyDown() then
+                    ns.PP:OpenPanelMenu(self:GetParent())
+                    return
+                end
+
                 if GetTime() - friendsCache.lastUpdate > 1 then BuildFriendsCache() end
                 MenuUtil.CreateContextMenu(self, function(_, root)
                     root:CreateTitle("Social: Friends")
-                    
                     local whisperMenu = root:CreateButton("Whisper")
                     local hasRetail = false
                     for _, info in ipairs(friendsCache.wowFriends) do
@@ -331,18 +307,15 @@ PP:RegisterDatatext("Friends", {
                         local color = GetClassColor(info.className)
                         whisperMenu:CreateButton(string.format("|cff%02x%02x%02x%s|r (%s)", color.r*255, color.g*255, color.b*255, info.characterName, info.accountName), function() ChatFrameUtil.SendBNetTell(info.accountName) end)
                     end
-
                     if hasRetail and #friendsCache.bnetClassic > 0 then whisperMenu:CreateDivider() end
                     for _, info in ipairs(friendsCache.bnetClassic) do
                         local color = GetClassColor(info.className)
                         whisperMenu:CreateButton(string.format("|cff%02x%02x%02x%s|r (%s) - %s", color.r*255, color.g*255, color.b*255, info.characterName, info.accountName, info.version), function() ChatFrameUtil.SendBNetTell(info.accountName) end)
                     end
-
                     if (#friendsCache.bnetClassic > 0 or hasRetail) and #friendsCache.bnetOther > 0 then whisperMenu:CreateDivider() end
                     for _, info in ipairs(friendsCache.bnetOther) do
                         whisperMenu:CreateButton(info.accountName .. " |cff888888(" .. info.richPresence .. ")|r", function() ChatFrameUtil.SendBNetTell(info.accountName) end)
                     end
-
                     local inviteMenu = root:CreateButton("Invite")
                     for _, info in ipairs(friendsCache.bnetRetail) do
                         if info.characterName and not UnitInParty(info.characterName) and not UnitInRaid(info.characterName) then
@@ -404,28 +377,23 @@ PP:RegisterDatatext("Guild", {
             GameTooltip:AddLine(" ")
             GameTooltip:AddLine("|cff00ffffLeft-click|r to open/close Guild panel", 0.7, 0.7, 0.7)
             GameTooltip:AddLine("|cff00ffffRight-click|r for Whisper/Invite Menu", 0.7, 0.7, 0.7)
-            GameTooltip:AddLine("|cff00ffffHOLD Right-click|r for Options", 0.7, 0.7, 0.7)
+            GameTooltip:AddLine("|cff00ffffALT + Right-click|r for Panel Options", 0.7, 0.7, 0.7)
             GameTooltip:Show()
         end)
 
         slot:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-        -- Shield the background panel during right-clicks to prevent menu conflicts
-        slot:SetScript("OnMouseDown", function(self, button)
-            if button == "RightButton" or button == "Button4" then
-                self:SetPropagateMouseClicks(false)
-            end
-        end)
-
         slot:RegisterForClicks("LeftButtonUp", "RightButtonUp", "Button4Up")
         slot:SetScript("OnClick", function(self, button)
-            -- Restore propagation immediately
-            self:SetPropagateMouseClicks(true)
-
             if button == "LeftButton" then
                 ToggleGuildFrame()
-            -- Menu Bind: Plain Right Click OR Button 4 (Shift no longer required)
             elseif (button == "RightButton" or button == "Button4") and IsInGuild() then
+                 -- FIX: ALT+RightClick opens Panel Menu
+                 if IsAltKeyDown() then
+                    ns.PP:OpenPanelMenu(self:GetParent())
+                    return
+                end
+
                 if GetTime() - guildCache.lastUpdate > 1 then BuildGuildCache() end
                 local myName = UnitName("player")
                 MenuUtil.CreateContextMenu(self, function(_, root)
@@ -489,7 +457,6 @@ PP:RegisterDatatext("Bags", {
         MakeClickable(slot, function() ToggleAllBags() end)
         Update()
 
-         -- Tooltip to inform the user of the click action
         slot:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
             GameTooltip:ClearLines()
@@ -498,8 +465,6 @@ PP:RegisterDatatext("Bags", {
         end)
         slot:SetScript("OnLeave", function() GameTooltip:Hide() end)
     end
-
-    
 })
 
 -- 6. SYSTEM
@@ -516,7 +481,6 @@ PP:RegisterDatatext("FPS/Ping", {
             text:SetFormattedText("FPS: %d MS: %d", fps, latency)
         end
 
-        -- Tooltip to inform the user of the click action
         slot:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
             GameTooltip:ClearLines()
@@ -526,28 +490,30 @@ PP:RegisterDatatext("FPS/Ping", {
         
         slot:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-        -- Shield the background panel from the 12.0 "Pressed" state lock
-        slot:SetScript("OnMouseDown", function(self, button)
-            if button == "LeftButton" then
-                self:SetPropagateMouseClicks(false) 
-            end
-        end)
-
-        -- Click to open/close Graphics menu
-        slot:RegisterForClicks("LeftButtonUp")
+       -- Open Graphics setting on click
+       slot:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         slot:SetScript("OnClick", function(self, button)
-            self:SetPropagateMouseClicks(true)
-
             if button == "LeftButton" and not IsShiftKeyDown() then
                 if SettingsPanel:IsShown() then
                     HideUIPanel(SettingsPanel)
                 else
-                    -- Using the official Video/Graphics constant
-                    Settings.OpenToCategory(Settings.GRAPHICS_CATEGORY_ID)
+                    local foundID = nil
+                    for i = 0, 100 do
+                        local category = Settings.GetCategory(i)
+                        if category and category.GetName and category:GetName() == "Graphics" then
+                            foundID = i
+                            break
+                        end
+                    end
+                    if foundID then Settings.OpenToCategory(foundID)
+                    else Settings.OpenToCategory(2) end
                 end
+            elseif button == "RightButton" then
+                 -- FIX: Right click anywhere on FPS opens Panel Menu
+                 ns.PP:OpenPanelMenu(self:GetParent())
             end
         end)
-
+        
         if not slot.ticker then slot.ticker = C_Timer.NewTicker(2, Update) end
         Update()
     end
@@ -567,50 +533,28 @@ PP:RegisterDatatext("Durability", {
                 local dur, maxDur = GetInventoryItemDurability(i)
                 if dur then total = total + maxDur; current = current + dur end
             end
-            
             local percent = (total > 0) and floor((current / total) * 100) or 100
-            
-            -- Determine Color based on durability level
-            local colorStr
-            if percent >= 75 then
-                colorStr = "00ff00" -- Green (75%+)
-            elseif percent >= 50 then
-                colorStr = "ffff00" -- Yellow (50% to 74%)
-            elseif percent >= 25 then
-                colorStr = "ff7f00" -- Orange (25% to 49%)
-            else
-                colorStr = "ff0000" -- Red (0% to 24%)
-            end
-            
-            -- Apply formatting with the dynamic hex color
+            local colorStr = (percent >= 75) and "00ff00" or (percent >= 50) and "ffff00" or (percent >= 25) and "ff7f00" or "ff0000"
             text:SetFormattedText("Dur: |cff%s%d%%|r", colorStr, percent)
         end
 
         slot:RegisterEvent("UPDATE_INVENTORY_DURABILITY")
         slot:SetScript("OnEvent", Update)
-
-        -- Left click opens Character/Armor screen
-        MakeClickable(slot, function() 
-            ToggleCharacter("PaperDollFrame") 
-        end)
-
+        MakeClickable(slot, function() ToggleCharacter("PaperDollFrame") end)
         Update()
 
-         -- Tooltip to inform the user of the click action
         slot:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
             GameTooltip:ClearLines()
             GameTooltip:AddLine("|cff00ffffLeft-click|r to open/close the Character panel", 0.5, 0.5, 0.5)
             GameTooltip:Show()
         end)
-    
         slot:SetScript("OnLeave", function() GameTooltip:Hide() end)
     end
 })
 
 -- 8. ADDON MEMORY & CPU
 local addonPerformanceTable = {}
-
 PP:RegisterDatatext("Memory/CPU", {
     OnEnable = function(slot, fontSize, fontType)
         local text = slot.text or slot:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -620,12 +564,9 @@ PP:RegisterDatatext("Memory/CPU", {
         
         local function Update()
             UpdateAddOnMemoryUsage()
-            local mem = GetAddOnMemoryUsage("PennPanels") -- Using hardcoded string for stability
-            if mem > 1024 then
-                text:SetFormattedText("Mem: %.2f mb", mem / 1024)
-            else
-                text:SetFormattedText("Mem: %.0f kb", mem)
-            end
+            local mem = GetAddOnMemoryUsage("PennPanels")
+            if mem > 1024 then text:SetFormattedText("Mem: %.2f mb", mem / 1024)
+            else text:SetFormattedText("Mem: %.0f kb", mem) end
         end
 
         slot:SetScript("OnEnter", function(self)
@@ -641,34 +582,34 @@ PP:RegisterDatatext("Memory/CPU", {
             for i = 1, C_AddOns.GetNumAddOns() do
                 if C_AddOns.IsAddOnLoaded(i) then
                     local name = C_AddOns.GetAddOnInfo(i)
-                    table.insert(addonPerformanceTable, {
-                        name = name, 
-                        mem = GetAddOnMemoryUsage(i), 
-                        cpu = GetAddOnCPUUsage(i)
-                    })
+                    table.insert(addonPerformanceTable, {name = name, mem = GetAddOnMemoryUsage(i), cpu = GetAddOnCPUUsage(i)})
                 end
             end
-            
             table.sort(addonPerformanceTable, function(a, b) return a.cpu > b.cpu end)
-            
             for i = 1, math.min(#addonPerformanceTable, 15) do
                 local a = addonPerformanceTable[i]
                 local memStr = a.mem > 1024 and string.format("%.1fmb", a.mem / 1024) or string.format("%.0fkb", a.mem)
                 local cpuCol = a.cpu > 50 and "|cffff0000" or "|cffffffff"
                 GameTooltip:AddDoubleLine(a.name, string.format("%s%.1fms|r |cffaaaaaa(%.1fmb)|r", cpuCol, a.cpu, a.mem/1024))
             end
-            
             GameTooltip:AddLine(" ")
             GameTooltip:AddLine("|cff00ffffLeft-click|r to collect garbage", 0.5, 0.5, 0.5)
+            GameTooltip:AddLine("To see CPU usage, type |cff00ff00/console scriptProfile 1|r and reload. Use |cff00ff000|r to disable", 0.5, 0.5, 0.5)
+            GameTooltip:AddLine("|cffff00ffCPU profiling may affect game performance|r", 0.5, 0.5, 0.5)
             GameTooltip:Show()
         end)
 
         slot:SetScript("OnLeave", function() GameTooltip:Hide() end)
         
-        slot:SetScript("OnMouseDown", function(self, button)
+        -- Override MakeClickable since we need custom LeftButton logic
+        slot:EnableMouse(true)
+        slot:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        slot:SetScript("OnClick", function(self, button)
             if button == "LeftButton" then
                 collectgarbage("collect")
                 print("|cff00ffffPennPanels:|r Memory garbage collected.")
+            elseif button == "RightButton" then
+                ns.PP:OpenPanelMenu(self:GetParent())
             end
         end)
 
@@ -687,47 +628,26 @@ PP:RegisterDatatext("Talent Loadout", {
 
         local function Update()
             local specIndex = GetSpecialization()
-            if not specIndex then 
-                text:SetText("No Spec")
-                return 
-            end
-
+            if not specIndex then text:SetText("No Spec"); return end
             local specID = GetSpecializationInfo(specIndex)
-            local r, g, b = 1, 1, 1 -- Default white
-
-            -- 1. Check for Starter Build
             if C_ClassTalents.GetStarterBuildActive() then
                 text:SetFormattedText("|cff0070DDStarter Build|r")
                 return
             end
-
-            -- 2. Get the ID of the last selected saved loadout
             local configID = C_ClassTalents.GetLastSelectedSavedConfigID(specID)
             if configID then
                 local configInfo = C_Traits.GetConfigInfo(configID)
-                if configInfo and configInfo.name then
-                    -- Display the name you gave your talent profile (e.g., "Raid")
-                    text:SetText(configInfo.name)
-                else
-                    text:SetText("No Loadout")
-                end
-            else
-                text:SetText("Custom")
-            end
+                if configInfo and configInfo.name then text:SetText(configInfo.name)
+                else text:SetText("No Loadout") end
+            else text:SetText("Custom") end
         end
 
-        -- Events to trigger an update when talents or specs change
         slot:RegisterEvent("PLAYER_TALENT_UPDATE")
         slot:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
         slot:RegisterEvent("TRAIT_CONFIG_UPDATED")
         slot:RegisterEvent("PLAYER_ENTERING_WORLD")
-        
-        slot:SetScript("OnEvent", function()
-            -- Small delay to let the API update after a change
-            C_Timer.After(0.2, Update)
-        end)
+        slot:SetScript("OnEvent", function() C_Timer.After(0.2, Update) end)
 
-        -- Tooltip to inform the user of the click action
         slot:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
             GameTooltip:ClearLines()
@@ -736,25 +656,15 @@ PP:RegisterDatatext("Talent Loadout", {
         end)
         slot:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-        --Open Talents on Left click
-   MakeClickable(slot, function() 
-    local TALENT_TAB_INDEX = 2 
-    
-    -- If the frame is not even loaded, load it securely to the talent tab
-    if not PlayerSpellsFrame then
-        TogglePlayerSpellsFrame(TALENT_TAB_INDEX)
-    else
-        -- If already open on the talent tab, close it securely
-        if PlayerSpellsFrame:IsShown() and (PlayerSpellsFrame.GetTab and PlayerSpellsFrame:GetTab() == TALENT_TAB_INDEX) then
-            TogglePlayerSpellsFrame(TALENT_TAB_INDEX)
-        else
-            -- If closed or on another tab, open/switch to talents securely
-            ShowUIPanel(PlayerSpellsFrame)
-            PlayerSpellsFrame:SetTab(TALENT_TAB_INDEX)
-        end
-    end
-end)
-        
+        MakeClickable(slot, function() 
+            local TALENT_TAB_INDEX = 2 
+            if not PlayerSpellsFrame then TogglePlayerSpellsFrame(TALENT_TAB_INDEX)
+            else
+                if PlayerSpellsFrame:IsShown() and (PlayerSpellsFrame.GetTab and PlayerSpellsFrame:GetTab() == TALENT_TAB_INDEX) then
+                    TogglePlayerSpellsFrame(TALENT_TAB_INDEX)
+                else ShowUIPanel(PlayerSpellsFrame); PlayerSpellsFrame:SetTab(TALENT_TAB_INDEX) end
+            end
+        end)
         Update()
     end
 })
@@ -767,59 +677,45 @@ PP:RegisterDatatext("Volume", {
         text:SetPoint("CENTER")
         ApplySettings(text, fontSize, fontType)
 
-        -- Helper to get/set volume percentages (0-100)
         local function GetVolume() return math.floor(GetCVar("Sound_MasterVolume") * 100 + 0.5) end
         local function SetVolume(val) SetCVar("Sound_MasterVolume", math.min(1, math.max(0, val / 100))) end
 
         local function Update()
             local vol = GetVolume()
             local isMuted = GetCVar("Sound_EnableAllSound") == "0"
-            
-            if isMuted then
-                text:SetFormattedText("|cffff0000Muted|r")
-            else
-                -- Color logic: Yellow if low, White otherwise
-                local color = "ffffff"
-                text:SetFormattedText("Vol: |cff%s%d%%|r", color, vol)
-            end
+            if isMuted then text:SetFormattedText("|cffff0000Muted|r")
+            else text:SetFormattedText("Vol: |cffffffff%d%%|r", vol) end
         end
 
-        -- Enable Mouse Wheel for Scrolling
         slot:EnableMouseWheel(true)
         slot:SetScript("OnMouseWheel", function(self, delta)
             local current = GetVolume()
-            SetVolume(current + (delta * 5)) -- Adjusts by 5% per click
+            SetVolume(current + (delta * 5))
             Update()
         end)
 
-        -- Tooltip showing various levels
         slot:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
             GameTooltip:ClearLines()
             GameTooltip:AddLine("|cff00ffffLeft-click|r to open/close Audio settings", 0.5, 0.5, 0.5)
             GameTooltip:AddLine("|cff00ffffScroll|r to adjust Master Volume", 0.5, 0.5, 0.5)
             GameTooltip:AddLine("|cff00ffffRight-Click|r to Toggle Mute", 0.5, 0.5, 0.5)
+            GameTooltip:AddLine("|cff00ffffALT + Right-Click|r for Panel Options", 0.5, 0.5, 0.5)
             GameTooltip:Show()
         end)
         slot:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
         
-        slot:SetScript("OnMouseDown", function(self, button)
-            -- This stops the "Down" event from traveling up to PennPanels background
-            self:SetPropagateMouseClicks(false) 
-        end)
-
        slot:RegisterForClicks("LeftButtonUp", "RightButtonUp")
        slot:SetScript("OnClick", function(self, button)
-            self:SetPropagateMouseClicks(true)
-
             if button == "LeftButton" and not IsShiftKeyDown() then
-                if SettingsPanel:IsShown() then
-                    HideUIPanel(SettingsPanel) -- Standard secure way to close
-                else
-                    Settings.OpenToCategory(Settings.AUDIO_CATEGORY_ID)
-                end
+                if SettingsPanel:IsShown() then HideUIPanel(SettingsPanel)
+                else Settings.OpenToCategory(Settings.AUDIO_CATEGORY_ID) end
             elseif button == "RightButton" then
+                -- FIX: ALT+RightClick opens Panel Menu
+                 if IsAltKeyDown() then
+                    ns.PP:OpenPanelMenu(self:GetParent())
+                    return
+                end
                 local current = GetCVar("Sound_EnableAllSound")
                 SetCVar("Sound_EnableAllSound", current == "1" and "0" or "1")
                 Update()
@@ -839,55 +735,172 @@ PP:RegisterDatatext("Coordinates", {
 
         local function Update()
             local mapID = C_Map.GetBestMapForUnit("player")
-            
             if mapID then
                 local pos = C_Map.GetPlayerMapPosition(mapID, "player")
                 if pos and pos.GetXY then
                     local x, y = pos:GetXY()
                     if x and y then
-                        -- Formatting to two decimal places (e.g., 45, 12)
                         text:SetFormattedText("|cffffff00Coords:|r %d, %d", x * 100, y * 100)
                         return
                     end
                 end
             end
-            -- Fallback for instances or unmapped areas
             text:SetText("|cffffff00Coords:|r --, --")
         end
 
-        -- Update every 0.5 seconds for smooth movement tracking
         slot.ticker = C_Timer.NewTicker(0.5, Update)
 
-        -- Tooltip setup
         slot:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
             GameTooltip:ClearLines()
             GameTooltip:AddLine("Coordinates", 1, 1, 1)
             GameTooltip:AddLine(GetZoneText() or "Unknown Zone", 1, 0.82, 0)
-            
             local subzone = GetSubZoneText()
-            if subzone and subzone ~= "" then
-                GameTooltip:AddLine(subzone, 0.7, 0.7, 0.7)
-            end
-            
+            if subzone and subzone ~= "" then GameTooltip:AddLine(subzone, 0.7, 0.7, 0.7) end
             GameTooltip:AddLine(" ")
             GameTooltip:AddLine("|cff00ffffLeft-click|r to open/close World Map", 0.5, 0.5, 0.5)
             GameTooltip:Show()
         end)
         slot:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-        -- Click to open Map
-        slot:SetScript("OnClick", function()
-            ToggleWorldMap()
+        -- Enable Right Click for menu
+        MakeClickable(slot, function() ToggleWorldMap() end)
+        Update()
+    end,
+    OnDisable = function(slot)
+        if slot.ticker then slot.ticker:Cancel(); slot.ticker = nil end
+    end
+})
+
+------------------------------------
+-- 12. MYTHIC+ KEY
+------------------------------------
+
+-- 1. Color Keys based on level
+local function GetKeyColor(level)
+    if not level or level == 0 then return 0.7, 0.7, 0.7 end
+    if level >= 10 then return 1, 0.5, 0 end        -- Orange (10+ / Portal)
+    if level >= 7 then return 0.64, 0.21, 0.93 end  -- Purple (7-9 / Hero)
+    if level >= 4 then return 0, 0.44, 0.87 end     -- Blue (4-6 / Champion)
+    if level >= 2 then return 0.12, 1, 0 end        -- Green (2-3)
+    return 1, 1, 1                                  -- White (0-1)
+end
+
+-- 2. SEASONAL DUNGEON LIST (Manual Update)
+-- Map the FULL name (exactly as it appears in-game) to your preferred SHORT name.
+local nameMap = {
+    -- Midnight Season 1
+    ["Magister's Terrace"]      = "Terrace",
+    ["Maisara Caverns"]         = "Caverns",
+    ["Nexus-Point Xenas"]       = "Xenas",
+    ["Windrunner Spire"]        = "Spire",
+    ["Algeth'ar Academy"]       = "Academy",
+    ["Seat of the Triumvirate"] = "Seat",
+    ["Skyreach"]                = "Skyreach",
+    ["Pit of Saron"]            = "Pit",
+
+    -- Current Season (Retained)
+    ["Eco-Dome Aldani"]             = "Ecodome",
+    ["Tazavesh: Soleah's Gambit"]   = "Gambit",
+    ["Priory of the Sacred Flame"]  = "Priory",
+    ["Operation Floodgate"]         = "Floodgate",
+    ["Halls of Atonement"]          = "Halls",
+    ["Ara'kara, City of Echoes"]    = "Ara-Kara", -- User spelling
+    ["Ara-Kara, City of Echoes"]    = "Ara-Kara", -- Standard spelling fallback
+    ["Tazavesh: Streets of Wonder"] = "Streets",
+    ["The Dawnbreaker"]             = "Dawn",
+}
+
+local function GetShortDungeonName(mapID)
+    local name = C_ChallengeMode.GetMapUIInfo(mapID)
+    if not name then return "?" end
+    
+    -- Priority 1: Check the manual map
+    if nameMap[name] then 
+        return nameMap[name] 
+    end
+
+    -- Priority 2: Fallback logic (Safe defaults if name isn't in the list)
+    -- If it has a colon (Mega Dungeon), take the part AFTER the colon
+    if name:find(":") then
+        return name:match(":%s*(.+)") -- "Tazavesh: Streets" -> "Streets"
+    end
+    
+    -- If it has no colon, remove "The " and take the first word
+    local clean = name:gsub("^The ", "")
+    return clean:match("^(%S+)") or clean
+end
+
+PP:RegisterDatatext("Mythic Key", {
+    OnEnable = function(slot, fontSize, fontType, valueColor)
+        local text = slot.text or slot:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        slot.text = text
+        text:SetPoint("CENTER")
+        ApplySettings(text, fontSize, fontType)
+
+        local function Update()
+            local keystoneLevel = C_MythicPlus.GetOwnedKeystoneLevel()
+            local mapID = C_MythicPlus.GetOwnedKeystoneChallengeMapID()
+
+            if keystoneLevel and keystoneLevel > 0 and mapID then
+                local shortName = GetShortDungeonName(mapID)
+                local kr, kg, kb = GetKeyColor(keystoneLevel)
+                local hex = GetHexColor(valueColor)
+                
+                -- Format: "+10 Terrace" (Level colored, Name in standard color)
+                text:SetFormattedText("|cff%02x%02x%02x+%d|r |c%s%s|r", kr*255, kg*255, kb*255, keystoneLevel, hex, shortName)
+            else
+                local hex = GetHexColor(valueColor)
+                text:SetFormattedText("|c%sNo Key|r", hex)
+            end
+        end
+
+        -- Events
+        slot:RegisterEvent("PLAYER_ENTERING_WORLD")
+        slot:RegisterEvent("CHALLENGE_MODE_MAPS_UPDATE")
+        slot:RegisterEvent("BAG_UPDATE")
+        slot:SetScript("OnEvent", Update)
+
+        -- Tooltip
+        slot:SetScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_TOP")
+            GameTooltip:ClearLines()
+            GameTooltip:AddLine("Mythic+ Keystone", 1, 1, 1)
+            GameTooltip:AddLine(" ")
+
+            local keystoneLevel = C_MythicPlus.GetOwnedKeystoneLevel()
+            local mapID = C_MythicPlus.GetOwnedKeystoneChallengeMapID()
+
+            if keystoneLevel and keystoneLevel > 0 and mapID then
+                local name = C_ChallengeMode.GetMapUIInfo(mapID)
+                local r, g, b = GetKeyColor(keystoneLevel)
+                -- Show full name in tooltip
+                GameTooltip:AddDoubleLine("Current Key:", string.format("|cff%02x%02x%02x+%d %s|r", r*255, g*255, b*255, keystoneLevel, name or "Unknown"), 1, 1, 1)
+            else
+                GameTooltip:AddLine("No keystone in bags", 0.7, 0.7, 0.7)
+            end
+
+            GameTooltip:AddLine(" ")
+            GameTooltip:AddLine("|cff00ffffLeft-click|r to open Premade Groups", 0.5, 0.5, 0.5)
+            GameTooltip:AddLine("|cff00ffffRight-Click|r for Panel Options", 0.5, 0.5, 0.5)
+            GameTooltip:Show()
+        end)
+        slot:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+        -- Click Handler
+        slot:EnableMouse(true)
+        slot:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+        slot:SetScript("OnClick", function(self, button)
+            if button == "LeftButton" then
+                if not InCombatLockdown() then
+                    -- FIX: Open "Premade Groups" (LFGListPVEStub) instead of "Dungeon Finder" (LFDParentFrame)
+                    PVEFrame_ToggleFrame("GroupFinderFrame", LFGListPVEStub)
+                end
+            elseif button == "RightButton" then
+                 ns.PP:OpenPanelMenu(self:GetParent())
+            end
         end)
 
         Update()
-    end,
-    
-    OnDisable = function(slot)
-        if slot.ticker then
-            slot.ticker:Cancel()
-            slot.ticker = nil
-        end
     end
 })
