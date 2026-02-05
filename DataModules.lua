@@ -188,27 +188,47 @@ PP:RegisterDatatext("Gold", {
         slot.text = text
         text:SetPoint("CENTER")
         ApplySettings(text, fontSize, fontType)
+        
         local function Update()
             local gold = floor(GetMoney() / 10000)
             text:SetFormattedText("|cffffd700%sg|r", BreakUpLargeNumbers(gold))
         end
+        
         slot:RegisterEvent("PLAYER_MONEY")
         slot:SetScript("OnEvent", Update)
-        MakeClickable(slot, function() ToggleCharacter("TokenFrame") end)
+        
+        -- [FIX] Smart Click Behavior (Retail vs Classic)
+        MakeClickable(slot, function() 
+            local _, _, _, interfaceVersion = GetBuildInfo()
+            if interfaceVersion >= 100000 then
+                ToggleCharacter("TokenFrame") -- Retail: Open Currency Tab
+            else
+                ToggleCharacter("PaperDollFrame") -- Classic: Open Main Character Sheet
+            end
+        end)
+        
         Update()
         C_Timer.After(2, Update) 
 
         slot:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
             GameTooltip:ClearLines()
-            GameTooltip:AddLine("|cff00ffffLeft-click|r to open/close the Currency tab", 0.5, 0.5, 0.5)
+            
+            -- [FIX] Dynamic Tooltip Text
+            local _, _, _, interfaceVersion = GetBuildInfo()
+            if interfaceVersion >= 100000 then
+                GameTooltip:AddLine("|cff00ffffLeft-click|r to open/close Currency", 0.5, 0.5, 0.5)
+            else
+                GameTooltip:AddLine("|cff00ffffLeft-click|r to open/close Character", 0.5, 0.5, 0.5)
+            end
+            
             GameTooltip:Show()
         end)
          slot:SetScript("OnLeave", function() GameTooltip:Hide() end)
     end
 })
 
--- 3. FRIENDS
+-- 3. FRIENDS (Future-Proofed Strict Version Matching)
 PP:RegisterDatatext("Friends", {
     OnEnable = function(slot, fontSize, fontType, valueColor) 
         local text = slot.text or slot:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -265,8 +285,6 @@ PP:RegisterDatatext("Friends", {
             end
             GameTooltip:AddLine(" ")
             GameTooltip:AddLine("|cff00ffffLeft-click|r to open/close Friends panel", 0.7, 0.7, 0.7)
-            GameTooltip:AddLine("|cff00ffffRight-click|r for Whisper/Invite Menu", 0.7, 0.7, 0.7)
-            GameTooltip:AddLine("|cff00ffffALT + Right-click|r for Panel Options", 0.7, 0.7, 0.7)
             GameTooltip:Show()
         end)
 
@@ -286,46 +304,89 @@ PP:RegisterDatatext("Friends", {
             if button == "LeftButton" then
                   ToggleFriendsFrame(1) 
             elseif button == "RightButton" or button == "Button4" then
-                -- ALT+RightClick opens Panel Menu
                 if IsAltKeyDown() then
                     ns.PP:OpenPanelMenu(self:GetParent())
                     return
                 end
+                
+                -- Check for Retail API first
+                if MenuUtil then 
+                    if GetTime() - friendsCache.lastUpdate > 1 then BuildFriendsCache() end
+                    
+                    -- [FIX] STRICT VERSION MATCHING
+                    -- We capture the user's current Project ID (1=Retail, 2=Era, 5=TBC, 14=Cata, etc)
+                    -- This ensures invites only appear for friends on the exact same client.
+                    local myProjectID = WOW_PROJECT_ID
 
-                if GetTime() - friendsCache.lastUpdate > 1 then BuildFriendsCache() end
-                MenuUtil.CreateContextMenu(self, function(_, root)
-                    root:CreateTitle("Social: Friends")
-                    local whisperMenu = root:CreateButton("Whisper")
-                    local hasRetail = false
-                    for _, info in ipairs(friendsCache.wowFriends) do
-                        hasRetail = true
-                        local color = GetClassColor(info.className)
-                        whisperMenu:CreateButton(string.format("|cff%02x%02x%02x%s|r", color.r*255, color.g*255, color.b*255, info.name), function() ChatFrame_SendTell(info.name) end)
-                    end
-                    for _, info in ipairs(friendsCache.bnetRetail) do
-                        hasRetail = true
-                        local color = GetClassColor(info.className)
-                        whisperMenu:CreateButton(string.format("|cff%02x%02x%02x%s|r (%s)", color.r*255, color.g*255, color.b*255, info.characterName, info.accountName), function() ChatFrameUtil.SendBNetTell(info.accountName) end)
-                    end
-                    if hasRetail and #friendsCache.bnetClassic > 0 then whisperMenu:CreateDivider() end
-                    for _, info in ipairs(friendsCache.bnetClassic) do
-                        local color = GetClassColor(info.className)
-                        whisperMenu:CreateButton(string.format("|cff%02x%02x%02x%s|r (%s) - %s", color.r*255, color.g*255, color.b*255, info.characterName, info.accountName, info.version), function() ChatFrameUtil.SendBNetTell(info.accountName) end)
-                    end
-                    if (#friendsCache.bnetClassic > 0 or hasRetail) and #friendsCache.bnetOther > 0 then whisperMenu:CreateDivider() end
-                    for _, info in ipairs(friendsCache.bnetOther) do
-                        whisperMenu:CreateButton(info.accountName .. " |cff888888(" .. info.richPresence .. ")|r", function() ChatFrameUtil.SendBNetTell(info.accountName) end)
-                    end
-                    local inviteMenu = root:CreateButton("Invite")
-                    for _, info in ipairs(friendsCache.bnetRetail) do
-                        if info.characterName and not UnitInParty(info.characterName) and not UnitInRaid(info.characterName) then
+                    MenuUtil.CreateContextMenu(self, function(_, root)
+                        root:CreateTitle("Social: Friends")
+                        
+                        -- === WHISPER MENU (Cross-Game Allowed) ===
+                        local whisperMenu = root:CreateButton("Whisper")
+                        local hasRetail = false
+                        for _, info in ipairs(friendsCache.wowFriends) do
+                            hasRetail = true
                             local color = GetClassColor(info.className)
-                            local label = string.format("|cff%02x%02x%02x%s|r (%s) - |cff888888%s|r", color.r*255, color.g*255, color.b*255, info.characterName, info.accountName, info.zone or "Unknown")
-                            local invID = info.gameID
-                            inviteMenu:CreateButton(label, function() BNInviteFriend(invID) end)
+                            whisperMenu:CreateButton(string.format("|cff%02x%02x%02x%s|r", color.r*255, color.g*255, color.b*255, info.name), function() ChatFrame_SendTell(info.name) end)
                         end
-                    end
-                end)
+                        for _, info in ipairs(friendsCache.bnetRetail) do
+                            hasRetail = true
+                            local color = GetClassColor(info.className)
+                            whisperMenu:CreateButton(string.format("|cff%02x%02x%02x%s|r (%s)", color.r*255, color.g*255, color.b*255, info.characterName, info.accountName), function() ChatFrameUtil.SendBNetTell(info.accountName) end)
+                        end
+                        if hasRetail and #friendsCache.bnetClassic > 0 then whisperMenu:CreateDivider() end
+                        for _, info in ipairs(friendsCache.bnetClassic) do
+                            local color = GetClassColor(info.className)
+                            whisperMenu:CreateButton(string.format("|cff%02x%02x%02x%s|r (%s) - %s", color.r*255, color.g*255, color.b*255, info.characterName, info.accountName, info.version), function() ChatFrameUtil.SendBNetTell(info.accountName) end)
+                        end
+                        if (#friendsCache.bnetClassic > 0 or hasRetail) and #friendsCache.bnetOther > 0 then whisperMenu:CreateDivider() end
+                        for _, info in ipairs(friendsCache.bnetOther) do
+                            whisperMenu:CreateButton(info.accountName .. " |cff888888(" .. info.richPresence .. ")|r", function() ChatFrameUtil.SendBNetTell(info.accountName) end)
+                        end
+                        
+                        -- === INVITE MENU (Strict Version Match) ===
+                        local inviteMenu = root:CreateButton("Invite")
+                        local inviteCount = 0
+                        
+                        -- 1. Regular WoW Friends (Always Valid)
+                        for _, info in ipairs(friendsCache.wowFriends) do
+                            if not UnitInParty(info.name) and not UnitInRaid(info.name) then
+                                inviteCount = inviteCount + 1
+                                local color = GetClassColor(info.className)
+                                local label = string.format("|cff%02x%02x%02x%s|r", color.r*255, color.g*255, color.b*255, info.name)
+                                inviteMenu:CreateButton(label, function() C_PartyInfo.InviteUnit(info.name) end)
+                            end
+                        end
+
+                        -- 2. Battle.net Friends (Strictly Filtered)
+                        -- Iterate BOTH cached lists, but ONLY show if project IDs match exactly.
+                        local bnetLists = {friendsCache.bnetRetail, friendsCache.bnetClassic}
+                        
+                        for _, list in ipairs(bnetLists) do
+                            for _, info in ipairs(list) do
+                                -- [CRITICAL CHECK] Only allow if friend is on EXACT same version
+                                if info.wowProjectID == myProjectID then
+                                    if info.characterName and not UnitInParty(info.characterName) and not UnitInRaid(info.characterName) then
+                                        inviteCount = inviteCount + 1
+                                        local color = GetClassColor(info.className)
+                                        -- Simple format since we know they are on the same version
+                                        local label = string.format("|cff%02x%02x%02x%s|r (%s)", color.r*255, color.g*255, color.b*255, info.characterName, info.accountName)
+                                        local invID = info.gameID
+                                        inviteMenu:CreateButton(label, function() BNInviteFriend(invID) end)
+                                    end
+                                end
+                            end
+                        end
+
+                        if inviteCount == 0 then
+                            inviteMenu:SetEnabled(false)
+                            inviteMenu:CreateButton("No invitable friends online")
+                        end
+                    end)
+                else
+                     -- Classic Fallback (No MenuUtil available)
+                    ns.PP:OpenPanelMenu(self:GetParent())
+                end
             end
         end)
         Update()

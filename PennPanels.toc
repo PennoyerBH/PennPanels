@@ -1,4 +1,4 @@
-## Interface: 110007, 120000
+## Interface: 110007, 120000, 20505, 11508, 50503
 ## Title: PennPanels (Data Panels)
 ## Author: Pennoyer
 ## Version: 1.0.1
