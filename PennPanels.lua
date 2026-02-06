@@ -7,6 +7,7 @@ local addonName, ns = ...
 ns.PP = ns.PP or {}
 local PP = ns.PP
 PP.registry = PP.registry or {}
+local panelMenuFrame = CreateFrame("Frame", "PennPanels_PanelMenuFrame", UIParent, "UIDropDownMenuTemplate")
 
 local visibleSlots = {}
 local slotWidths = {}
@@ -17,16 +18,32 @@ function PP:RegisterDatatext(id, definition)
     PP.registry[id] = definition
 end
 
+-- =============================================================
+--  DEFAULT SETTINGS
+-- =============================================================
+
+-- 1. Defaults for a new panel created via /pp new
+local newPanelDefaults = {
+    width = 450, 
+    height = 25, 
+    fontSize = 12,
+    alpha = 1.0,
+    fontType = "Interface\\AddOns\\PennPanels\\Fonts\\ARIALN.ttf",
+    slots = {"Time", "Gold"}
+}
+
+-- 2. Defaults for the initial install (MainPanel)
 local defaults = {
     textColor = {r=1, g=1, b=1},
     panels = {
         ["MainPanel"] = {
-            width = 450, height = 25,
-            fontSize = 12,
-            alpha = 1.0, 
-            fontType = "Interface\\AddOns\\PennPanels\\Fonts\\ARIALN.ttf",
+            width = newPanelDefaults.width, 
+            height = newPanelDefaults.height,
+            fontSize = newPanelDefaults.fontSize,
+            alpha = newPanelDefaults.alpha, 
+            fontType = newPanelDefaults.fontType,
             position = {"CENTER", "UIParent", "CENTER", 0, 0},
-            slots = {"Time", "Gold"} 
+            slots = newPanelDefaults.slots
         }
     }
 }
@@ -34,46 +51,82 @@ local defaults = {
 -----------------------------------------------------------------
 -- SHARED MENU LOGIC (Accessible by DataModules.lua)
 -----------------------------------------------------------------
+
 function PP:OpenPanelMenu(panel)
     if not panel then return end
     local id = panel.panelID
 
-    MenuUtil.CreateContextMenu(panel, function(owner, root)
-        root:CreateTitle("PennPanels: " .. id)
+    -- Retail (Dragonflight/War Within) Use MenuUtil
+    if MenuUtil then
+        MenuUtil.CreateContextMenu(panel, function(owner, root)
+            root:CreateTitle("PennPanels: " .. id)
+            
+            -- Module Management
+            local add = root:CreateButton("Add Module")
+            for key, _ in pairs(PP.registry) do
+                add:CreateButton(key, function()
+                    table.insert(PennPanelsDB.panels[id].slots, key)
+                    PP:RefreshPanel(panel)
+                end)
+            end
+            
+            local rem = root:CreateButton("Remove Module")
+            for i, key in ipairs(PennPanelsDB.panels[id].slots) do
+                rem:CreateButton(key, function()
+                    table.remove(PennPanelsDB.panels[id].slots, i)
+                    PP:RefreshPanel(panel)
+                end)
+            end
+
+            root:CreateButton("Addon Options", function() 
+                if PP.optionsCategoryID then Settings.OpenToCategory(PP.optionsCategoryID)
+                else Settings.OpenToCategory("PennPanels") end
+            end)
+            
+            root:CreateDivider()
+            root:CreateTitle("")
+            
+            root:CreateButton("|cffff0000Delete Panel|r", function()
+                PennPanelsDB.panels[id] = nil
+                panel:Hide()
+            end)
+        end) 
+    else
+        -- Classic/TBC Fallback
+        local menuList = {
+            { text = "PennPanels: " .. id, isTitle = true, notCheckable = true },
+            { text = "Add Module", hasArrow = true, notCheckable = true, menuList = {} },
+            { text = "Remove Module", hasArrow = true, notCheckable = true, menuList = {} },
+            
+            --  Spacer/Divider to prevent accidental clicks
+            { text = "", notCheckable = true, disabled = true },
+            
+            { text = "|cffff0000Delete Panel|r", notCheckable = true, func = function() 
+                PennPanelsDB.panels[id] = nil
+                panel:Hide()
+            end }
+        }
         
-        -- Module Management
-        local add = root:CreateButton("Add Module")
+        -- Populate Add
         for key, _ in pairs(PP.registry) do
-            add:CreateButton(key, function()
+            table.insert(menuList[2].menuList, { text = key, notCheckable = true, func = function()
                 table.insert(PennPanelsDB.panels[id].slots, key)
                 PP:RefreshPanel(panel)
-            end)
+            end})
         end
         
-        local rem = root:CreateButton("Remove Module")
+        -- Populate Remove
         for i, key in ipairs(PennPanelsDB.panels[id].slots) do
-            rem:CreateButton(key, function()
+            table.insert(menuList[3].menuList, { text = key, notCheckable = true, func = function()
                 table.remove(PennPanelsDB.panels[id].slots, i)
                 PP:RefreshPanel(panel)
-            end)
+            end})
         end
-
-        root:CreateButton("Addon Options", function() 
-            if PP.optionsCategoryID then Settings.OpenToCategory(PP.optionsCategoryID)
-            else Settings.OpenToCategory("PennPanels") end
-        end)
         
-        root:CreateDivider()
-        local spacer = root:CreateButton(" ")
-        spacer:SetEnabled(false) 
-        
-        root:CreateButton("|cffff0000Delete Panel|r", function()
-            PennPanelsDB.panels[id] = nil
-            panel:Hide()
-        end)
-    end) 
+        -- Use the shared frame defined at the top of the file
+        EasyMenu(menuList, panelMenuFrame, "cursor", 0, 0, "MENU")
+    end
 end
-
 -----------------------------------------------------------------
 -- Drawing the Panel, Moving Panel, Right Click Options
 -----------------------------------------------------------------
@@ -121,9 +174,24 @@ function PP:RefreshPanel(panel, skipEnable)
        -- Apply font/size settings
         if PP.registry[dtID] then
             if not skipEnable then
+                --  Stop any running timers from previous modules so they don't overwrite new ones when deleting and replacing
+                if slot.ticker then 
+                    slot.ticker:Cancel()
+                    slot.ticker = nil 
+                end
+                
+                --  Clear all previous scripts/events including OnShow
                 slot:UnregisterAllEvents()
                 slot:SetScript("OnEvent", nil)
                 slot:SetScript("OnUpdate", nil)
+                slot:SetScript("OnEnter", nil)
+                slot:SetScript("OnLeave", nil)
+                slot:SetScript("OnClick", nil)
+                slot:SetScript("OnMouseWheel", nil)
+                slot:SetScript("OnShow", nil) 
+                slot:EnableMouseWheel(false)
+
+                -- Load new module
                 PP.registry[dtID].OnEnable(slot, config.fontSize or 12, config.fontType or "Fonts\\FRIZQT__.ttf", config.valueColor)
             else
                 if slot.text then
@@ -147,6 +215,11 @@ function PP:RefreshPanel(panel, skipEnable)
     end
 
     for i = num + 1, #panel.slots do
+        -- Ensure hidden slots stop updating too
+        if panel.slots[i].ticker then 
+            panel.slots[i].ticker:Cancel()
+            panel.slots[i].ticker = nil
+        end
         panel.slots[i]:Hide()
     end
 
@@ -155,25 +228,16 @@ function PP:RefreshPanel(panel, skipEnable)
         local segmentWidth = config.width / 2
         for i, slot in ipairs(visibleSlots) do
             slot:ClearAllPoints()
-            
-            -- [FIX] Increased Hitbox with Safety Cap
-            -- Add 50px padding so it's easier to click...
             local expandedWidth = slotWidths[i] + 50 
-            -- ...BUT limit it so there is always at least 20px of empty space for the background menu.
             local maxWidth = math.max(slotWidths[i], segmentWidth - 20)
-            
             slot:SetWidth(math.min(expandedWidth, maxWidth)) 
-            
-            -- Center it in its half
             slot:SetPoint("CENTER", panel, "LEFT", (i - 0.5) * segmentWidth, 0)
-            
             if slot.text then
                 slot.text:ClearAllPoints()
                 slot.text:SetPoint("CENTER", slot, "CENTER", 0, 0)
             end
         end
     else
-        -- Standard layout for 1 or 3+ modules
         local usableWidth = config.width - 30
         local finalGap = math.min(40, (num > 1) and (usableWidth - totalTextWidth) / (num - 1) or 0)
         local currentX = (config.width - (totalTextWidth + (finalGap * (num - 1)))) / 2
@@ -193,8 +257,22 @@ end
 function PP:CreatePanel(id, config)
     local panel = _G["PP_Panel_"..id] or CreateFrame("Frame", "PP_Panel_" .. id, UIParent, BackdropTemplate)
     panel.panelID = id
-    panel:SetSize(config.width, config.height)
+    
+    -- Force show (fixes deleted panels not reappearing)
+    panel:Show()
+    
+    -- Repair corrupted data from SavedVariables
+    -- If position is missing (caused your error), apply default immediately
+    if not config.position then
+        config.position = {"CENTER", "UIParent", "CENTER", 0, 0}
+    end
+
+    panel:SetSize(config.width or 300, config.height or 25)
+    
+    -- Clear existing points to prevent anchors locking up
+    panel:ClearAllPoints()
     panel:SetPoint(unpack(config.position))
+    
     panel:SetAlpha(1.0)
 
     if not panel.bg then
@@ -219,16 +297,14 @@ function PP:CreatePanel(id, config)
         PennPanelsDB.panels[id].position = {p, "UIParent", rp, x, y}
     end)
 
-    -- Panel Menu on Right Click (Background)
  	panel:SetScript("OnMouseDown", function(self, button)
-        if SettingsPanel:IsShown() then self:StopMovingOrSizing() end
+        if SettingsPanel and SettingsPanel.IsShown and SettingsPanel:IsShown() then self:StopMovingOrSizing() end
         if button == "RightButton" then
-            PP:OpenPanelMenu(self) -- Use shared function
+            PP:OpenPanelMenu(self) 
         end 
     end)
 
     PP:RefreshPanel(panel)
-    -- FIX: Run again after delay to fix squished layout on login
     C_Timer.After(0.5, function() PP:RefreshPanel(panel, true) end)
 end
 
@@ -257,130 +333,134 @@ f:SetScript("OnEvent", function(self, event, name)
             if PennPanelsDB[k] == nil then PennPanelsDB[k] = v end
         end
 
-        local category = Settings.RegisterVerticalLayoutCategory("PennPanels")
-        PP.settingsCategory = category
+        -- RETAIL SETTINGS REGISTRATION
+        if Settings and Settings.RegisterVerticalLayoutCategory then
+            local category = Settings.RegisterVerticalLayoutCategory("PennPanels")
+            PP.settingsCategory = category
 
-        Settings.CreateElementInitializer("SettingsListSectionHeaderTemplate", {name = "Panel Fonts"})
-        for panelID, config in pairs(PennPanelsDB.panels) do
-            local fontSetting = Settings.RegisterAddOnSetting(category, "PP_Font_"..panelID, "fontSize", config, Settings.VarType.Number, "Font Size: "..panelID, 12)
-            fontSetting:SetValueChangedCallback(function(setting, value)
-                config.fontSize = value
-                local panelFrame = _G["PP_Panel_"..panelID]
-                if panelFrame then PP:RefreshPanel(panelFrame, true) end
-            end)
-            local fontSliderOptions = Settings.CreateSliderOptions(8, 24, 1)
-            fontSliderOptions:SetLabelFormatter(MinimalSliderWithSteppersMixin.Label.Right)
-            Settings.CreateSlider(category, fontSetting, fontSliderOptions, "Adjust font size")
-        end
-
-        Settings.CreateElementInitializer("SettingsListSectionHeaderTemplate", {name = "Panel Widths"})
-        for panelID, config in pairs(PennPanelsDB.panels) do
-            local widthSetting = Settings.RegisterAddOnSetting(category, "PP_Width_"..panelID, "width", config, Settings.VarType.Number, "Width: "..panelID, 300)
-            widthSetting:SetValueChangedCallback(function(setting, value)
-                if not PennPanelsDB.panels[panelID] then return end 
-                config.width = value 
-                local panelFrame = _G["PP_Panel_"..panelID]
-                if panelFrame then 
-                    panelFrame:SetWidth(value) 
-                    PP:RefreshPanel(panelFrame, true) 
-                end
-            end)
-            local widthSliderOptions = Settings.CreateSliderOptions(100, 1000, 1)
-            widthSliderOptions:SetLabelFormatter(MinimalSliderWithSteppersMixin.Label.Right)
-            Settings.CreateSlider(category, widthSetting, widthSliderOptions, "Adjust width")
-        end
-
-        Settings.CreateElementInitializer("SettingsListSectionHeaderTemplate", {name = "Panel Heights"})
-        for panelID, config in pairs(PennPanelsDB.panels) do
-            local heightSetting = Settings.RegisterAddOnSetting(category, "PP_Height_"..panelID, "height", config, Settings.VarType.Number, "Height: "..panelID, 25)
-            heightSetting:SetValueChangedCallback(function(setting, value)
-                config.height = value 
-                local panelFrame = _G["PP_Panel_"..panelID]
-                if panelFrame then 
-                    panelFrame:SetHeight(value) 
-                    PP:RefreshPanel(panelFrame, true) 
-                end
-            end)
-            local heightSliderOptions = Settings.CreateSliderOptions(10, 100, 1)
-            heightSliderOptions:SetLabelFormatter(MinimalSliderWithSteppersMixin.Label.Right)
-            Settings.CreateSlider(category, heightSetting, heightSliderOptions, "Adjust height")
-        end
-
-        Settings.CreateElementInitializer("SettingsListSectionHeaderTemplate", {name = "Panel Font Styles"})
-        local fontOptions = {
-            {name = "Accidental Presidency", value = "Interface\\AddOns\\PennPanels\\Fonts\\accid___.ttf"},
-            {name = "Arial Narrow", value = "Interface\\AddOns\\PennPanels\\Fonts\\ARIALN.TTF"},
-            {name = "Atkinson", value = "Interface\\AddOns\\PennPanels\\Fonts\\AtkinsonHyperlegibleNext-Regular.otf"},
-            {name = "Diablo", value = "Interface\\AddOns\\PennPanels\\Fonts\\DiabloHeavy.ttf"},
-            {name = "Expressway", value = "Interface\\AddOns\\PennPanels\\Fonts\\expressway.otf"},
-            {name = "Fritz Quadrata", value = "Interface\\AddOns\\PennPanels\\Fonts\\FrizQuadrataRegular.otf"},
-            {name = "Poppins", value = "Interface\\AddOns\\PennPanels\\Fonts\\Poppins-SemiBold.ttf"},
-            {name = "Roboto", value = "Interface\\AddOns\\PennPanels\\Fonts\\RobotoCondensed-Bold.ttf"},
-        }
-        for panelID, config in pairs(PennPanelsDB.panels) do
-            config.fontType = config.fontType or "Interface\\AddOns\\PennPanels\\Fonts\\ARIALN.ttf"
-            local fontTypeSetting = Settings.RegisterAddOnSetting(category, "PP_FontType_"..panelID, "fontType", config, Settings.VarType.String, "Style: "..panelID, "Interface\\AddOns\\PennPanels\\Fonts\\ARIALN.ttf")
-            fontTypeSetting:SetValueChangedCallback(function(setting, value)
-                config.fontType = value
-                local panelFrame = _G["PP_Panel_"..panelID]
-                if panelFrame then PP:RefreshPanel(panelFrame) end
-            end)
-            local function GetOptionsTable()
-                local container = Settings.CreateControlTextContainer()
-                for _, font in ipairs(fontOptions) do container:Add(font.value, font.name) end
-                return container:GetData()
+            Settings.CreateElementInitializer("SettingsListSectionHeaderTemplate", {name = "Panel Fonts"})
+            for panelID, config in pairs(PennPanelsDB.panels) do
+                local fontSetting = Settings.RegisterAddOnSetting(category, "PP_Font_"..panelID, "fontSize", config, Settings.VarType.Number, "Font Size: "..panelID, 12)
+                fontSetting:SetValueChangedCallback(function(setting, value)
+                    config.fontSize = value
+                    local panelFrame = _G["PP_Panel_"..panelID]
+                    if panelFrame then PP:RefreshPanel(panelFrame, true) end
+                end)
+                local fontSliderOptions = Settings.CreateSliderOptions(8, 24, 1)
+                fontSliderOptions:SetLabelFormatter(MinimalSliderWithSteppersMixin.Label.Right)
+                Settings.CreateSlider(category, fontSetting, fontSliderOptions, "Adjust font size")
             end
-            local initializer = Settings.CreateElementInitializer("SettingsDropdownControlTemplate", {
-                setting = fontTypeSetting, options = GetOptionsTable, tooltip = "Change font style for "..panelID,
-            })
-            Settings.RegisterInitializer(category, initializer)
+
+            Settings.CreateElementInitializer("SettingsListSectionHeaderTemplate", {name = "Panel Widths"})
+            for panelID, config in pairs(PennPanelsDB.panels) do
+                local widthSetting = Settings.RegisterAddOnSetting(category, "PP_Width_"..panelID, "width", config, Settings.VarType.Number, "Width: "..panelID, 300)
+                widthSetting:SetValueChangedCallback(function(setting, value)
+                    if not PennPanelsDB.panels[panelID] then return end 
+                    config.width = value 
+                    local panelFrame = _G["PP_Panel_"..panelID]
+                    if panelFrame then 
+                        panelFrame:SetWidth(value) 
+                        PP:RefreshPanel(panelFrame, true) 
+                    end
+                end)
+                local widthSliderOptions = Settings.CreateSliderOptions(100, 1000, 1)
+                widthSliderOptions:SetLabelFormatter(MinimalSliderWithSteppersMixin.Label.Right)
+                Settings.CreateSlider(category, widthSetting, widthSliderOptions, "Adjust width")
+            end
+
+            Settings.CreateElementInitializer("SettingsListSectionHeaderTemplate", {name = "Panel Heights"})
+            for panelID, config in pairs(PennPanelsDB.panels) do
+                local heightSetting = Settings.RegisterAddOnSetting(category, "PP_Height_"..panelID, "height", config, Settings.VarType.Number, "Height: "..panelID, 25)
+                heightSetting:SetValueChangedCallback(function(setting, value)
+                    config.height = value 
+                    local panelFrame = _G["PP_Panel_"..panelID]
+                    if panelFrame then 
+                        panelFrame:SetHeight(value) 
+                        PP:RefreshPanel(panelFrame, true) 
+                    end
+                end)
+                local heightSliderOptions = Settings.CreateSliderOptions(10, 100, 1)
+                heightSliderOptions:SetLabelFormatter(MinimalSliderWithSteppersMixin.Label.Right)
+                Settings.CreateSlider(category, heightSetting, heightSliderOptions, "Adjust height")
+            end
+
+            Settings.CreateElementInitializer("SettingsListSectionHeaderTemplate", {name = "Panel Font Styles"})
+            local fontOptions = {
+                {name = "Accidental Presidency", value = "Interface\\AddOns\\PennPanels\\Fonts\\accid___.ttf"},
+                {name = "Arial Narrow", value = "Interface\\AddOns\\PennPanels\\Fonts\\ARIALN.TTF"},
+                {name = "Atkinson", value = "Interface\\AddOns\\PennPanels\\Fonts\\AtkinsonHyperlegibleNext-Regular.otf"},
+                {name = "Diablo", value = "Interface\\AddOns\\PennPanels\\Fonts\\DiabloHeavy.ttf"},
+                {name = "Expressway", value = "Interface\\AddOns\\PennPanels\\Fonts\\expressway.otf"},
+                {name = "Fritz Quadrata", value = "Interface\\AddOns\\PennPanels\\Fonts\\FrizQuadrataRegular.otf"},
+                {name = "Poppins", value = "Interface\\AddOns\\PennPanels\\Fonts\\Poppins-SemiBold.ttf"},
+                {name = "Roboto", value = "Interface\\AddOns\\PennPanels\\Fonts\\RobotoCondensed-Bold.ttf"},
+            }
+            for panelID, config in pairs(PennPanelsDB.panels) do
+                config.fontType = config.fontType or "Interface\\AddOns\\PennPanels\\Fonts\\ARIALN.ttf"
+                local fontTypeSetting = Settings.RegisterAddOnSetting(category, "PP_FontType_"..panelID, "fontType", config, Settings.VarType.String, "Style: "..panelID, "Interface\\AddOns\\PennPanels\\Fonts\\ARIALN.ttf")
+                fontTypeSetting:SetValueChangedCallback(function(setting, value)
+                    config.fontType = value
+                    local panelFrame = _G["PP_Panel_"..panelID]
+                    if panelFrame then PP:RefreshPanel(panelFrame) end
+                end)
+                local function GetOptionsTable()
+                    local container = Settings.CreateControlTextContainer()
+                    for _, font in ipairs(fontOptions) do container:Add(font.value, font.name) end
+                    return container:GetData()
+                end
+                local initializer = Settings.CreateElementInitializer("SettingsDropdownControlTemplate", {
+                    setting = fontTypeSetting, options = GetOptionsTable, tooltip = "Change font style for "..panelID,
+                })
+                Settings.RegisterInitializer(category, initializer)
+            end
+
+            Settings.CreateElementInitializer("SettingsListSectionHeaderTemplate", {name = "Panel Opacity"})
+            for panelID, config in pairs(PennPanelsDB.panels) do
+                config.alpha = config.alpha or 1.0
+                local alphaSetting = Settings.RegisterAddOnSetting(category, "PP_Alpha_"..panelID, "alpha", config, Settings.VarType.Number, "Opacity: "..panelID, 1.0)
+                alphaSetting:SetValueChangedCallback(function(setting, value)
+                    config.alpha = value 
+                    local panelFrame = _G["PP_Panel_"..panelID]
+                    if panelFrame and panelFrame.bg then 
+                        panelFrame.bg:SetVertexColor(0, 0, 0, value)
+                        PP:RefreshPanel(panelFrame, true) 
+                    end
+                end)
+                local alphaSliderOptions = Settings.CreateSliderOptions(0.1, 1.0, 0.05)
+                alphaSliderOptions:SetLabelFormatter(function(value) return "" end)
+                Settings.CreateSlider(category, alphaSetting, alphaSliderOptions, "Adjust background opacity")
+            end
+
+            Settings.CreateElementInitializer("SettingsListSectionHeaderTemplate", {name = "PennPanels Commands & Help"})
+            local helpLines = {
+                "|cffffd700Slash Commands:|r",
+                "• /pp or /pennpanels - Open options.",
+                "• /pp new [name] - Create new panel.",
+                "Reload after creating a new panel for its settings to appear here.",
+                "Give a name for the panel to better track it in the options, e.g. /pp new Bottom Panel.",
+                "This way it is easier to track which bar you're changing settings for.",
+                "|cffffd700Interactions:|r",
+                "• Shift + Left Click & Drag - Move panel.",
+                "• Left click opens various tabs/panels.",
+                "• Right Click - Quick menu (or Hold Right Click for Guild/Friends).",
+                "|cffffd700Other Info:|r",
+                "• Hover over module to see tooltips with more info.",
+                "• When changing font, you may need to adjust size/width/height. It won't autoformat to fit",
+            }
+            for _, line in ipairs(helpLines) do
+                local initializer = Settings.CreateElementInitializer("SettingsListSectionHeaderTemplate", { name = line })
+                initializer.factory = CreateHelpLineFrame
+                Settings.RegisterInitializer(category, initializer)
+            end
+
+            Settings.RegisterAddOnCategory(category)
+            PP.optionsCategoryID = category:GetID()
         end
 
-    Settings.CreateElementInitializer("SettingsListSectionHeaderTemplate", {name = "Panel Opacity"})
-    for panelID, config in pairs(PennPanelsDB.panels) do
-        config.alpha = config.alpha or 1.0
-        local alphaSetting = Settings.RegisterAddOnSetting(category, "PP_Alpha_"..panelID, "alpha", config, Settings.VarType.Number, "Opacity: "..panelID, 1.0)
-        alphaSetting:SetValueChangedCallback(function(setting, value)
-            config.alpha = value 
-            local panelFrame = _G["PP_Panel_"..panelID]
-            if panelFrame and panelFrame.bg then 
-                panelFrame.bg:SetVertexColor(0, 0, 0, value)
-                PP:RefreshPanel(panelFrame, true) 
-            end
-        end)
-        local alphaSliderOptions = Settings.CreateSliderOptions(0.1, 1.0, 0.05)
-        alphaSliderOptions:SetLabelFormatter(function(value) return "" end)
-        Settings.CreateSlider(category, alphaSetting, alphaSliderOptions, "Adjust background opacity")
-    end
-
-    Settings.CreateElementInitializer("SettingsListSectionHeaderTemplate", {name = "PennPanels Commands & Help"})
-    local helpLines = {
-        "|cffffd700Slash Commands:|r",
-        "• /pp or /pennpanels - Open options.",
-        "• /pp new [name] - Create new panel.",
-        "Reload after creating a new panel for its settings to appear here.",
-        "Give a name for the panel to better track it in the options, e.g. /pp new Bottom Panel.",
-        "This way it is easier to track which bar you're changing settings for.",
-        "|cffffd700Interactions:|r",
-        "• Shift + Left Click & Drag - Move panel.",
-        "• Left click opens various tabs/panels.",
-        "• Right Click - Quick menu (or Hold Right Click for Guild/Friends).",
-        "|cffffd700Other Info:|r",
-        "• Hover over module to see tooltips with more info.",
-        "• When changing font, you may need to adjust size/width/height. It won't autoformat to fit",
-    }
-    for _, line in ipairs(helpLines) do
-        local initializer = Settings.CreateElementInitializer("SettingsListSectionHeaderTemplate", { name = line })
-        initializer.factory = CreateHelpLineFrame
-        Settings.RegisterInitializer(category, initializer)
-    end
-
-    Settings.RegisterAddOnCategory(category)
-    PP.optionsCategoryID = category:GetID()
-
-    for id, config in pairs(PennPanelsDB.panels) do
-        PP:CreatePanel(id, config)
-    end
+        -- Create Panels (Always runs, even on Classic)
+        for id, config in pairs(PennPanelsDB.panels) do
+            PP:CreatePanel(id, config)
+        end
     end 
 end)
 
@@ -391,13 +471,32 @@ SlashCmdList["PP"] = function(msg)
     if msg:find("^new") then
         local name = msg:sub(5):trim()
         name = (name ~= "") and name or "Panel" .. math.random(100)
+        
+        -- Protection: Check if panel exists before creating/overwriting it
+        if PennPanelsDB.panels[name] then
+            print("|cff00ffffPennPanels:|r |cffff0000Error:|r A panel named '" .. name .. "' already exists. Delete it first if you want to replace it.")
+            return
+        end
+        
+        -- Use centralized defaults from top of file
         PennPanelsDB.panels[name] = { 
-            width = 300, height = 25, fontSize = 12, 
-            position = {"CENTER", "UIParent", "CENTER", 0, 0}, slots = {"Time"} 
+            width = newPanelDefaults.width, 
+            height = newPanelDefaults.height, 
+            fontSize = newPanelDefaults.fontSize, 
+            alpha = newPanelDefaults.alpha,
+            fontType = newPanelDefaults.fontType,
+            position = {"CENTER", "UIParent", "CENTER", 0, 0}, 
+            slots = {unpack(newPanelDefaults.slots)} 
         }
+        
         PP:CreatePanel(name, PennPanelsDB.panels[name])
+        print("|cff00ffffPennPanels:|r Created new panel: " .. name)
+        
     elseif msg == "" or msg == "options" or msg == "config" then
-        if PP.optionsCategoryID then Settings.OpenToCategory(PP.optionsCategoryID) 
-        else Settings.OpenToCategory("PennPanels") end
+        if PP.optionsCategoryID and Settings and Settings.OpenToCategory then 
+            Settings.OpenToCategory(PP.optionsCategoryID) 
+        else 
+            print("|cff00ffffPennPanels:|r Options GUI not supported on this client version yet.")
+        end
     end
 end

@@ -6,7 +6,13 @@
 local addonName, ns = ...
 ns.PP = ns.PP or {}
 local PP = ns.PP
+local menuFrame = CreateFrame("Frame", "PennPanels_DataMenuFrame", UIParent, "UIDropDownMenuTemplate")
 
+------------------------------------
+--       HELPERS
+------------------------------------
+
+-- --- General Helpers ---
 local function ApplySettings(textString, fontSize, fontType)
     if not textString then return end
     local db = PennPanelsDB or { textColor = {r=1, g=1, b=1} }
@@ -20,7 +26,7 @@ local function ApplySettings(textString, fontSize, fontType)
     
     local currentFont = textString:GetFont()
     if not currentFont then
-        textString:SetFont("Fonts\\FRIZQT__.ttf", fontSize or 12, fontFlags or "")
+        textString:SetFont("Fonts\\FRIZQT__.TTF", fontSize or 12, fontFlags or "")
     end
     
     if db.textColor then
@@ -33,7 +39,6 @@ local function GetHexColor(colorTable)
     return string.format("ff%02x%02x%02x", c.r*255, c.g*255, c.b*255)
 end
 
---Registers Right Click to trigger Panel Menu for "Simple" modules
 local function MakeClickable(slot, func)
     slot:EnableMouse(true)
     slot:RegisterForClicks("LeftButtonUp", "RightButtonUp")
@@ -41,15 +46,32 @@ local function MakeClickable(slot, func)
         if button == "LeftButton" and not IsShiftKeyDown() then 
             func() 
         elseif button == "RightButton" then
-            -- Trigger Panel Menu on right click since this module has no right-click function
             ns.PP:OpenPanelMenu(self:GetParent())
         end
     end)
 end
 
-------------------------------------
---       SOCIAL HELPERS
-------------------------------------
+-- --- COMPATIBILITY HELPERS ---
+local function GetNumFriendsUniversal()
+    if C_FriendList and C_FriendList.GetNumFriends then return C_FriendList.GetNumFriends() else return GetNumFriends() end
+end
+
+local function GetFriendInfoUniversal(index)
+    if C_FriendList and C_FriendList.GetFriendInfoByIndex then return C_FriendList.GetFriendInfoByIndex(index)
+    else
+        local name, level, class, area, connected, status, notes = GetFriendInfo(index)
+        if not name then return nil end
+        return { name = name, level = level, className = class, area = area, connected = connected, afk = (status == "AFK"), dnd = (status == "DND") }
+    end
+end
+
+-- Safe Invite: Tries Retail API first, falls back to Classic global
+local function SafeInvite(name)
+    if C_PartyInfo and C_PartyInfo.InviteUnit then C_PartyInfo.InviteUnit(name)
+    elseif InviteUnit then InviteUnit(name) end
+end
+
+-- --- SOCIAL HELPERS ---
 local friendsCache = { wowFriends = {}, bnetRetail = {}, bnetClassic = {}, bnetOther = {}, lastUpdate = 0 }
 local guildCache = { members = {}, lastUpdate = 0 }
 local PROJECT_NAMES = { [1] = "Retail", [2] = "Classic", [5] = "TBC", [11] = "Wrath", [14] = "Cata" }
@@ -66,8 +88,10 @@ end
 
 local function BuildFriendsCache()
     wipe(friendsCache.wowFriends); wipe(friendsCache.bnetRetail); wipe(friendsCache.bnetClassic); wipe(friendsCache.bnetOther)
-    for i = 1, C_FriendList.GetNumFriends() do
-        local info = C_FriendList.GetFriendInfoByIndex(i)
+    
+    local numFriends = GetNumFriendsUniversal()
+    for i = 1, numFriends do
+        local info = GetFriendInfoUniversal(i)
         if info and info.connected then
             table.insert(friendsCache.wowFriends, { 
                 name = info.name, level = info.level, className = info.className, 
@@ -75,6 +99,7 @@ local function BuildFriendsCache()
             })
         end
     end
+
     if BNConnected() then
         for i = 1, BNGetNumFriends() do
             local accountInfo = C_BattleNet.GetFriendAccountInfo(i)
@@ -89,13 +114,23 @@ local function BuildFriendsCache()
                     zone = game.areaName, 
                     client = game.clientProgram,
                     afk = accountInfo.isAFK or game.isGameAFK, 
-                    dnd = accountInfo.isDND or game.isGameBusy
+                    dnd = accountInfo.isDND or game.isGameBusy,
+                    wowProjectID = game.wowProjectID,
+                    richPresence = game.richPresence -- Store rich presence for non-WoW games
                 }
+                
                 if game.clientProgram == BNET_CLIENT_WOW then
-                    if game.wowProjectID == 1 then table.insert(friendsCache.bnetRetail, entry)
-                    else entry.version = PROJECT_NAMES[game.wowProjectID] or "Classic"; table.insert(friendsCache.bnetClassic, entry) end
+                    if game.wowProjectID == 1 then 
+                        entry.version = "Retail"
+                        table.insert(friendsCache.bnetRetail, entry)
+                    else 
+                        entry.version = PROJECT_NAMES[game.wowProjectID] or "Classic"
+                        table.insert(friendsCache.bnetClassic, entry) 
+                    end
                 else
-                    entry.richPresence = game.richPresence or game.clientProgram; table.insert(friendsCache.bnetOther, entry)
+                    -- For non-WoW games (App, OW, Diablo), use the client name or rich presence
+                    entry.version = game.richPresence or game.clientProgram or "App"
+                    table.insert(friendsCache.bnetOther, entry)
                 end
             end
         end
@@ -159,14 +194,18 @@ PP:RegisterDatatext("Time", {
             GameTooltip:ClearLines()
             GameTooltip:AddLine("Schedule", 1, 1, 1)
             GameTooltip:AddLine(" ")
-            local dailyReset = C_DateAndTime.GetSecondsUntilDailyReset()
-            if dailyReset and dailyReset > 0 then
-                GameTooltip:AddDoubleLine("Daily Reset", FormatTime(dailyReset), 0.8, 0.8, 0.8, 1, 1, 1)
+            
+            if C_DateAndTime and C_DateAndTime.GetSecondsUntilDailyReset then
+                local dailyReset = C_DateAndTime.GetSecondsUntilDailyReset()
+                if dailyReset and dailyReset > 0 then
+                    GameTooltip:AddDoubleLine("Daily Reset", FormatTime(dailyReset), 0.8, 0.8, 0.8, 1, 1, 1)
+                end
+                local weeklyReset = C_DateAndTime.GetSecondsUntilWeeklyReset()
+                if weeklyReset and weeklyReset > 0 then
+                    GameTooltip:AddDoubleLine("Weekly Reset", FormatTime(weeklyReset), 0.8, 0.8, 0.8, 1, 1, 1)
+                end
             end
-            local weeklyReset = C_DateAndTime.GetSecondsUntilWeeklyReset()
-            if weeklyReset and weeklyReset > 0 then
-                GameTooltip:AddDoubleLine("Weekly Reset", FormatTime(weeklyReset), 0.8, 0.8, 0.8, 1, 1, 1)
-            end
+            
             GameTooltip:AddLine(" ")
             GameTooltip:AddDoubleLine("Server Time", GameTime_GetGameTime(true), 0.8, 0.8, 0.8, 1, 1, 1)
             GameTooltip:AddLine(" ")
@@ -183,7 +222,7 @@ PP:RegisterDatatext("Time", {
         
 -- 2. GOLD
 PP:RegisterDatatext("Gold", {
-    OnEnable = function(slot, fontSize, fontType)
+    OnEnable = function(slot, fontSize, fontType, valueColor)
         local text = slot.text or slot:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         slot.text = text
         text:SetPoint("CENTER")
@@ -195,40 +234,43 @@ PP:RegisterDatatext("Gold", {
         end
         
         slot:RegisterEvent("PLAYER_MONEY")
+        slot:RegisterEvent("PLAYER_ENTERING_WORLD")
         slot:SetScript("OnEvent", Update)
         
-        -- [FIX] Smart Click Behavior (Retail vs Classic)
+        -- Update on Show to catch frame creation issues
+        slot:SetScript("OnShow", Update)
+        
         MakeClickable(slot, function() 
             local _, _, _, interfaceVersion = GetBuildInfo()
             if interfaceVersion >= 100000 then
-                ToggleCharacter("TokenFrame") -- Retail: Open Currency Tab
+                ToggleCharacter("TokenFrame") -- Retail
             else
-                ToggleCharacter("PaperDollFrame") -- Classic: Open Main Character Sheet
+                ToggleCharacter("PaperDollFrame") -- Classic
             end
         end)
         
+        --  Use a Ticker (like Time module) to ensure persistence
+        if not slot.ticker then 
+            slot.ticker = C_Timer.NewTicker(2, Update)
+        end
         Update()
-        C_Timer.After(2, Update) 
 
         slot:SetScript("OnEnter", function(self)
             GameTooltip:SetOwner(self, "ANCHOR_TOP")
             GameTooltip:ClearLines()
-            
-            -- [FIX] Dynamic Tooltip Text
             local _, _, _, interfaceVersion = GetBuildInfo()
             if interfaceVersion >= 100000 then
                 GameTooltip:AddLine("|cff00ffffLeft-click|r to open/close Currency", 0.5, 0.5, 0.5)
             else
                 GameTooltip:AddLine("|cff00ffffLeft-click|r to open/close Character", 0.5, 0.5, 0.5)
             end
-            
             GameTooltip:Show()
         end)
          slot:SetScript("OnLeave", function() GameTooltip:Hide() end)
     end
 })
 
--- 3. FRIENDS (Future-Proofed Strict Version Matching)
+-- 3. FRIENDS (Fixed: Class Colors, All BNet Friends, Strict Invites)
 PP:RegisterDatatext("Friends", {
     OnEnable = function(slot, fontSize, fontType, valueColor) 
         local text = slot.text or slot:CreateFontString(nil, "OVERLAY", "GameFontNormal")
@@ -254,14 +296,12 @@ PP:RegisterDatatext("Friends", {
                 for _, f in ipairs(friendsCache.wowFriends) do
                     local color = GetClassColor(f.className)
                     local status = f.afk and "|cffFFFF00 {AFK}|r" or f.dnd and "|cffFF0000 {DND}|r" or ""
-                    local inGroup = (UnitInParty(f.name) or UnitInRaid(f.name)) and "|cffaaaaaa*|r" or ""
-                    GameTooltip:AddDoubleLine(f.name .. inGroup .. status, f.zone, color.r, color.g, color.b, 0.7, 0.7, 0.7)
+                    GameTooltip:AddDoubleLine(f.name .. status, f.zone, color.r, color.g, color.b, 0.7, 0.7, 0.7)
                 end
                 for _, f in ipairs(friendsCache.bnetRetail) do
                     local color = GetClassColor(f.className)
                     local status = f.afk and "|cffFFFF00 {AFK}|r" or f.dnd and "|cffFF0000 {DND}|r" or ""
-                    local inGroup = (UnitInParty(f.characterName) or UnitInRaid(f.characterName)) and "|cffaaaaaa*|r" or ""
-                    GameTooltip:AddDoubleLine(f.characterName .. inGroup .. " ("..f.accountName..")" .. status, f.zone, color.r, color.g, color.b, 0.7, 0.7, 0.7)
+                    GameTooltip:AddDoubleLine(f.characterName .. " ("..f.accountName..")" .. status, f.zone, color.r, color.g, color.b, 0.7, 0.7, 0.7)
                 end
             end
             if #friendsCache.bnetClassic > 0 then
@@ -270,8 +310,8 @@ PP:RegisterDatatext("Friends", {
                 for _, f in ipairs(friendsCache.bnetClassic) do
                     local color = GetClassColor(f.className)
                     local status = f.afk and "|cffFFFF00 {AFK}|r" or f.dnd and "|cffFF0000 {DND}|r" or ""
-                    local inGroup = (UnitInParty(f.characterName) or UnitInRaid(f.characterName)) and "|cffaaaaaa*|r" or ""
-                    local leftText = string.format("|cff%02x%02x%02x%s|r%s (%s) - %s%s", color.r*255, color.g*255, color.b*255, f.characterName, inGroup, f.accountName, f.version, status)
+                    local ver = f.version and "("..f.version..")" or ""
+                    local leftText = string.format("|cff%02x%02x%02x%s|r%s (%s) - %s%s", color.r*255, color.g*255, color.b*255, f.characterName, ver, f.accountName, f.version, status)
                     GameTooltip:AddDoubleLine(leftText, f.zone or "Unknown", 1, 1, 1, 0.7, 0.7, 0.7)
                 end
             end
@@ -279,8 +319,7 @@ PP:RegisterDatatext("Friends", {
                 GameTooltip:AddLine(" ")
                 GameTooltip:AddLine("Other Games", 0.5, 0.5, 0.5)
                 for _, f in ipairs(friendsCache.bnetOther) do
-                    local status = f.afk and "|cffFFFF00 {AFK}|r" or f.dnd and "|cffFF0000 {DND}|r" or ""
-                    GameTooltip:AddDoubleLine(f.accountName .. status, f.richPresence, 0.8, 0.8, 0.8, 0.5, 0.5, 0.5)
+                    GameTooltip:AddDoubleLine(f.accountName, f.version or "App", 0.8, 0.8, 0.8, 0.5, 0.5, 0.5)
                 end
             end
             GameTooltip:AddLine(" ")
@@ -309,83 +348,132 @@ PP:RegisterDatatext("Friends", {
                     return
                 end
                 
-                -- Check for Retail API first
-                if MenuUtil then 
-                    if GetTime() - friendsCache.lastUpdate > 1 then BuildFriendsCache() end
-                    
-                    -- [FIX] STRICT VERSION MATCHING
-                    -- We capture the user's current Project ID (1=Retail, 2=Era, 5=TBC, 14=Cata, etc)
-                    -- This ensures invites only appear for friends on the exact same client.
-                    local myProjectID = WOW_PROJECT_ID
+                if GetTime() - friendsCache.lastUpdate > 1 then BuildFriendsCache() end
+                
+                -- Capture IDs for Strict Filtering
+                local myProjectID = WOW_PROJECT_ID 
 
+                if MenuUtil then 
+                    -- RETAIL MENU LOGIC
                     MenuUtil.CreateContextMenu(self, function(_, root)
                         root:CreateTitle("Social: Friends")
                         
-                        -- === WHISPER MENU (Cross-Game Allowed) ===
+                        -- 1. WHISPER (Inclusive: WoW + App + Other Games)
                         local whisperMenu = root:CreateButton("Whisper")
-                        local hasRetail = false
+                        
+                        -- Add Realm Friends
                         for _, info in ipairs(friendsCache.wowFriends) do
-                            hasRetail = true
                             local color = GetClassColor(info.className)
                             whisperMenu:CreateButton(string.format("|cff%02x%02x%02x%s|r", color.r*255, color.g*255, color.b*255, info.name), function() ChatFrame_SendTell(info.name) end)
                         end
-                        for _, info in ipairs(friendsCache.bnetRetail) do
-                            hasRetail = true
-                            local color = GetClassColor(info.className)
-                            whisperMenu:CreateButton(string.format("|cff%02x%02x%02x%s|r (%s)", color.r*255, color.g*255, color.b*255, info.characterName, info.accountName), function() ChatFrameUtil.SendBNetTell(info.accountName) end)
-                        end
-                        if hasRetail and #friendsCache.bnetClassic > 0 then whisperMenu:CreateDivider() end
-                        for _, info in ipairs(friendsCache.bnetClassic) do
-                            local color = GetClassColor(info.className)
-                            whisperMenu:CreateButton(string.format("|cff%02x%02x%02x%s|r (%s) - %s", color.r*255, color.g*255, color.b*255, info.characterName, info.accountName, info.version), function() ChatFrameUtil.SendBNetTell(info.accountName) end)
-                        end
-                        if (#friendsCache.bnetClassic > 0 or hasRetail) and #friendsCache.bnetOther > 0 then whisperMenu:CreateDivider() end
-                        for _, info in ipairs(friendsCache.bnetOther) do
-                            whisperMenu:CreateButton(info.accountName .. " |cff888888(" .. info.richPresence .. ")|r", function() ChatFrameUtil.SendBNetTell(info.accountName) end)
-                        end
                         
-                        -- === INVITE MENU (Strict Version Match) ===
+                        -- Add ALL Bnet Friends (Retail + Classic + App/Other)
+                        local allBnet = {}
+                        for _, v in ipairs(friendsCache.bnetRetail) do table.insert(allBnet, v) end
+                        for _, v in ipairs(friendsCache.bnetClassic) do table.insert(allBnet, v) end
+                        for _, v in ipairs(friendsCache.bnetOther) do table.insert(allBnet, v) end -- Include App/Overwatch/etc
+                        
+                        for _, info in ipairs(allBnet) do
+                            local color = GetClassColor(info.className) -- White if no class (App users)
+                            local ver = info.version and " - "..info.version or ""
+                            local name = info.characterName or info.accountName
+                            
+                            -- Label with Class Color applied
+                            local label = string.format("|cff%02x%02x%02x%s|r (%s)%s", color.r*255, color.g*255, color.b*255, name, info.accountName, ver)
+                            
+                            whisperMenu:CreateButton(label, function() ChatFrameUtil.SendBNetTell(info.accountName) end)
+                        end
+
+                        -- 2. INVITE (Strict ID Match Only)
                         local inviteMenu = root:CreateButton("Invite")
-                        local inviteCount = 0
+                        local count = 0
                         
-                        -- 1. Regular WoW Friends (Always Valid)
+                        -- A. Local Realm (Always matches)
                         for _, info in ipairs(friendsCache.wowFriends) do
                             if not UnitInParty(info.name) and not UnitInRaid(info.name) then
-                                inviteCount = inviteCount + 1
+                                count = count + 1
                                 local color = GetClassColor(info.className)
                                 local label = string.format("|cff%02x%02x%02x%s|r", color.r*255, color.g*255, color.b*255, info.name)
-                                inviteMenu:CreateButton(label, function() C_PartyInfo.InviteUnit(info.name) end)
+                                inviteMenu:CreateButton(label, function() SafeInvite(info.name) end)
                             end
                         end
 
-                        -- 2. Battle.net Friends (Strictly Filtered)
-                        -- Iterate BOTH cached lists, but ONLY show if project IDs match exactly.
-                        local bnetLists = {friendsCache.bnetRetail, friendsCache.bnetClassic}
+                        -- B. Battle.net (Strict Project ID Check)
+                        local invBnet = {}
+                        for _, v in ipairs(friendsCache.bnetRetail) do table.insert(invBnet, v) end
+                        for _, v in ipairs(friendsCache.bnetClassic) do table.insert(invBnet, v) end
                         
-                        for _, list in ipairs(bnetLists) do
-                            for _, info in ipairs(list) do
-                                -- [CRITICAL CHECK] Only allow if friend is on EXACT same version
-                                if info.wowProjectID == myProjectID then
-                                    if info.characterName and not UnitInParty(info.characterName) and not UnitInRaid(info.characterName) then
-                                        inviteCount = inviteCount + 1
-                                        local color = GetClassColor(info.className)
-                                        -- Simple format since we know they are on the same version
-                                        local label = string.format("|cff%02x%02x%02x%s|r (%s)", color.r*255, color.g*255, color.b*255, info.characterName, info.accountName)
-                                        local invID = info.gameID
-                                        inviteMenu:CreateButton(label, function() BNInviteFriend(invID) end)
-                                    end
+                        for _, info in ipairs(invBnet) do
+                            if info.wowProjectID == myProjectID then
+                                if info.characterName and not UnitInParty(info.characterName) and not UnitInRaid(info.characterName) then
+                                    count = count + 1
+                                    local color = GetClassColor(info.className)
+                                    local label = string.format("|cff%02x%02x%02x%s|r (%s)", color.r*255, color.g*255, color.b*255, info.characterName, info.accountName)
+                                    inviteMenu:CreateButton(label, function() BNInviteFriend(info.gameID) end)
                                 end
                             end
                         end
 
-                        if inviteCount == 0 then
+                        if count == 0 then
                             inviteMenu:SetEnabled(false)
                             inviteMenu:CreateButton("No invitable friends online")
                         end
                     end)
                 else
-                     -- Classic Fallback (No MenuUtil available)
-                    ns.PP:OpenPanelMenu(self:GetParent())
+                    -- CLASSIC/TBC FALLBACK (EasyMenu)
+                    local menuList = {
+                        { text = "Social: Friends", isTitle = true, notCheckable = true },
+                        { text = "Whisper", hasArrow = true, notCheckable = true, menuList = {} },
+                        { text = "Invite", hasArrow = true, notCheckable = true, menuList = {} }
+                    }
+                    
+                    -- Populate Whisper (Inclusive + Colored)
+                    for _, info in ipairs(friendsCache.wowFriends) do
+                        local color = GetClassColor(info.className)
+                        local text = string.format("|cff%02x%02x%02x%s|r", color.r*255, color.g*255, color.b*255, info.name)
+                        table.insert(menuList[2].menuList, { text = text, notCheckable = true, func = function() ChatFrame_SendTell(info.name) end })
+                    end
+                    
+                    local allBnet = {}
+                    for _, v in ipairs(friendsCache.bnetRetail) do table.insert(allBnet, v) end
+                    for _, v in ipairs(friendsCache.bnetClassic) do table.insert(allBnet, v) end
+                    for _, v in ipairs(friendsCache.bnetOther) do table.insert(allBnet, v) end
+                    
+                    for _, info in ipairs(allBnet) do
+                        local color = GetClassColor(info.className)
+                        local ver = info.version and " - "..info.version or ""
+                        local name = info.characterName or info.accountName
+                        local text = string.format("|cff%02x%02x%02x%s|r (%s)%s", color.r*255, color.g*255, color.b*255, name, info.accountName, ver)
+                        table.insert(menuList[2].menuList, { text = text, notCheckable = true, func = function() BNSendWhisper(info.bnetID, "") end })
+                    end
+
+                    -- Populate Invite (Strict + SafeInvite)
+                    local invCount = 0
+                    for _, info in ipairs(friendsCache.wowFriends) do
+                        invCount = invCount + 1
+                        local color = GetClassColor(info.className)
+                        local text = string.format("|cff%02x%02x%02x%s|r", color.r*255, color.g*255, color.b*255, info.name)
+                        table.insert(menuList[3].menuList, { text = text, notCheckable = true, func = function() SafeInvite(info.name) end })
+                    end
+                    
+                    local invBnet = {}
+                    for _, v in ipairs(friendsCache.bnetRetail) do table.insert(invBnet, v) end
+                    for _, v in ipairs(friendsCache.bnetClassic) do table.insert(invBnet, v) end
+                    
+                    for _, info in ipairs(invBnet) do
+                        if info.wowProjectID == myProjectID and info.characterName then
+                            invCount = invCount + 1
+                            local color = GetClassColor(info.className)
+                            local text = string.format("|cff%02x%02x%02x%s|r (%s)", color.r*255, color.g*255, color.b*255, info.characterName, info.accountName)
+                            table.insert(menuList[3].menuList, { text = text, notCheckable = true, func = function() BNInviteFriend(info.gameID) end })
+                        end
+                    end
+                    
+                    if invCount == 0 then
+                        table.insert(menuList[3].menuList, { text = "No friends online", notCheckable = true, disabled = true })
+                    end
+
+                   EasyMenu(menuList, menuFrame, "cursor", 0, 0, "MENU")
                 end
             end
         end)
@@ -407,7 +495,7 @@ PP:RegisterDatatext("Guild", {
                 text:SetText("No Guild")
                 return
             end
-            C_GuildInfo.GuildRoster()
+            if C_GuildInfo and C_GuildInfo.GuildRoster then C_GuildInfo.GuildRoster() end
             local _, online = GetNumGuildMembers()
             local hex = GetHexColor(valueColor)
             text:SetFormattedText("|cff00ff00Guild:|r |c%s%d|r", hex, online or 0)
@@ -449,36 +537,69 @@ PP:RegisterDatatext("Guild", {
             if button == "LeftButton" then
                 ToggleGuildFrame()
             elseif (button == "RightButton" or button == "Button4") and IsInGuild() then
-                 -- FIX: ALT+RightClick opens Panel Menu
+                 -- 1. ALT KEY CHECK: Opens Settings
                  if IsAltKeyDown() then
                     ns.PP:OpenPanelMenu(self:GetParent())
                     return
                 end
 
-                if GetTime() - guildCache.lastUpdate > 1 then BuildGuildCache() end
-                local myName = UnitName("player")
-                MenuUtil.CreateContextMenu(self, function(_, root)
-                    root:CreateTitle("Social: Guild")
-                    local whisperMenu = root:CreateButton("Whisper")
-                    for _, info in ipairs(guildCache.members) do
+                if MenuUtil then
+                    -- RETAIL MENU
+                    if GetTime() - guildCache.lastUpdate > 1 then BuildGuildCache() end
+                    local myName = UnitName("player")
+                    MenuUtil.CreateContextMenu(self, function(_, root)
+                        root:CreateTitle("Social: Guild")
+                        local whisperMenu = root:CreateButton("Whisper")
+                        for _, info in ipairs(guildCache.members) do
+                            local displayName = Ambiguate(info.name, "guild")
+                            if info.online and displayName ~= myName then
+                                local color = GetClassColor(info.class)
+                                local name = info.name
+                                whisperMenu:CreateButton(string.format("|cff%02x%02x%02x%s|r", color.r*255, color.g*255, color.b*255, displayName), function() ChatFrame_SendTell(name) end)
+                            end
+                        end
+                        local inviteMenu = root:CreateButton("Invite")
+                        for _, info in ipairs(guildCache.members) do
+                            local displayName = Ambiguate(info.name, "guild")
+                            if info.online and displayName ~= myName and not UnitInParty(info.name) and not UnitInRaid(info.name) then
+                                local color = GetClassColor(info.class)
+                                local label = string.format("|cff%02x%02x%02x%s|r - |cff888888%s|r", color.r*255, color.g*255, color.b*255, displayName, info.zone or "Unknown")
+                                local name = info.name
+                                inviteMenu:CreateButton(label, function() SafeInvite(name) end)
+                            end
+                        end
+                    end)
+                else
+                     -- CLASSIC FALLBACK
+                     if GetTime() - guildCache.lastUpdate > 1 then BuildGuildCache() end
+                     local myName = UnitName("player")
+                     local menuList = {
+                        { text = "Social: Guild", isTitle = true, notCheckable = true },
+                        { text = "Whisper", hasArrow = true, notCheckable = true, menuList = {} },
+                        { text = "Invite", hasArrow = true, notCheckable = true, menuList = {} }
+                     }
+                     
+                     for _, info in ipairs(guildCache.members) do
                         local displayName = Ambiguate(info.name, "guild")
                         if info.online and displayName ~= myName then
                             local color = GetClassColor(info.class)
-                            local name = info.name
-                            whisperMenu:CreateButton(string.format("|cff%02x%02x%02x%s|r", color.r*255, color.g*255, color.b*255, displayName), function() ChatFrame_SendTell(name) end)
+                            local text = string.format("|cff%02x%02x%02x%s|r", color.r*255, color.g*255, color.b*255, displayName)
+                            table.insert(menuList[2].menuList, { text = text, notCheckable = true, func = function() ChatFrame_SendTell(info.name) end })
                         end
-                    end
-                    local inviteMenu = root:CreateButton("Invite")
-                    for _, info in ipairs(guildCache.members) do
+                     end
+                     
+                     for _, info in ipairs(guildCache.members) do
                         local displayName = Ambiguate(info.name, "guild")
                         if info.online and displayName ~= myName and not UnitInParty(info.name) and not UnitInRaid(info.name) then
                             local color = GetClassColor(info.class)
-                            local label = string.format("|cff%02x%02x%02x%s|r - |cff888888%s|r", color.r*255, color.g*255, color.b*255, displayName, info.zone or "Unknown")
-                            local name = info.name
-                            inviteMenu:CreateButton(label, function() C_PartyInfo.InviteUnit(name) end)
+                            local text = string.format("|cff%02x%02x%02x%s|r - |cff888888%s|r", color.r*255, color.g*255, color.b*255, displayName, info.zone or "Unknown")
+                            table.insert(menuList[3].menuList, { text = text, notCheckable = true, func = function() SafeInvite(info.name) end })
                         end
-                    end
-                end)
+                     end
+                     
+                     -- Only call EasyMenu here, using the shared frame
+                     EasyMenu(menuList, menuFrame, "cursor", 0, 0, "MENU")
+                end
             end
         end)
 
@@ -497,7 +618,7 @@ PP:RegisterDatatext("Guild", {
 
 -- 5. BAGS
 PP:RegisterDatatext("Bags", {
-    OnEnable = function(slot, fontSize, fontType)
+    OnEnable = function(slot, fontSize, fontType, valueColor)
         local text = slot.text or slot:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         slot.text = text
         text:SetPoint("CENTER")
@@ -511,7 +632,8 @@ PP:RegisterDatatext("Bags", {
                     total = total + C_Container.GetContainerNumSlots(i)
                 end
             end
-            text:SetFormattedText("|cffffff00Bags:|r %d/%d", (total - free), total)
+            local hex = GetHexColor(valueColor)
+            text:SetFormattedText("|cffffff00Bags:|r |c%s%d/%d|r", hex, (total - free), total)
         end
         slot:RegisterEvent("BAG_UPDATE")
         slot:SetScript("OnEvent", Update)
@@ -551,7 +673,6 @@ PP:RegisterDatatext("FPS/Ping", {
         
         slot:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-       -- Open Graphics setting on click
        slot:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         slot:SetScript("OnClick", function(self, button)
             if button == "LeftButton" and not IsShiftKeyDown() then
@@ -570,7 +691,6 @@ PP:RegisterDatatext("FPS/Ping", {
                     else Settings.OpenToCategory(2) end
                 end
             elseif button == "RightButton" then
-                 -- FIX: Right click anywhere on FPS opens Panel Menu
                  ns.PP:OpenPanelMenu(self:GetParent())
             end
         end)
@@ -662,7 +782,6 @@ PP:RegisterDatatext("Memory/CPU", {
 
         slot:SetScript("OnLeave", function() GameTooltip:Hide() end)
         
-        -- Override MakeClickable since we need custom LeftButton logic
         slot:EnableMouse(true)
         slot:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         slot:SetScript("OnClick", function(self, button)
@@ -679,60 +798,62 @@ PP:RegisterDatatext("Memory/CPU", {
     end
 })
 
--- 9. TALENT LOADOUT NAME
-PP:RegisterDatatext("Talent Loadout", {
-    OnEnable = function(slot, fontSize, fontType)
-        local text = slot.text or slot:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        slot.text = text
-        text:SetPoint("CENTER")
-        ApplySettings(text, fontSize, fontType)
+-- 9. TALENT LOADOUT NAME (Only works in Retail)
+if C_ClassTalents and C_ClassTalents.GetActiveConfigID then
+    PP:RegisterDatatext("Talent Loadout", {
+        OnEnable = function(slot, fontSize, fontType)
+            local text = slot.text or slot:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            slot.text = text
+            text:SetPoint("CENTER")
+            ApplySettings(text, fontSize, fontType)
 
-        local function Update()
-            local specIndex = GetSpecialization()
-            if not specIndex then text:SetText("No Spec"); return end
-            local specID = GetSpecializationInfo(specIndex)
-            if C_ClassTalents.GetStarterBuildActive() then
-                text:SetFormattedText("|cff0070DDStarter Build|r")
-                return
+            local function Update()
+                local specIndex = GetSpecialization()
+                if not specIndex then text:SetText("No Spec"); return end
+                local specID = GetSpecializationInfo(specIndex)
+                if C_ClassTalents.GetStarterBuildActive() then
+                    text:SetFormattedText("|cff0070DDStarter Build|r")
+                    return
+                end
+                local configID = C_ClassTalents.GetLastSelectedSavedConfigID(specID)
+                if configID then
+                    local configInfo = C_Traits.GetConfigInfo(configID)
+                    if configInfo and configInfo.name then text:SetText(configInfo.name)
+                    else text:SetText("No Loadout") end
+                else text:SetText("Custom") end
             end
-            local configID = C_ClassTalents.GetLastSelectedSavedConfigID(specID)
-            if configID then
-                local configInfo = C_Traits.GetConfigInfo(configID)
-                if configInfo and configInfo.name then text:SetText(configInfo.name)
-                else text:SetText("No Loadout") end
-            else text:SetText("Custom") end
+
+            slot:RegisterEvent("PLAYER_TALENT_UPDATE")
+            slot:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
+            slot:RegisterEvent("TRAIT_CONFIG_UPDATED")
+            slot:RegisterEvent("PLAYER_ENTERING_WORLD")
+            slot:SetScript("OnEvent", function() C_Timer.After(0.2, Update) end)
+
+            slot:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_TOP")
+                GameTooltip:ClearLines()
+                GameTooltip:AddLine("|cff00ffffLeft-click|r to open/close Talents", 0.5, 0.5, 0.5)
+                GameTooltip:Show()
+            end)
+            slot:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+            MakeClickable(slot, function() 
+                local TALENT_TAB_INDEX = 2 
+                if not PlayerSpellsFrame then TogglePlayerSpellsFrame(TALENT_TAB_INDEX)
+                else
+                    if PlayerSpellsFrame:IsShown() and (PlayerSpellsFrame.GetTab and PlayerSpellsFrame:GetTab() == TALENT_TAB_INDEX) then
+                        TogglePlayerSpellsFrame(TALENT_TAB_INDEX)
+                    else ShowUIPanel(PlayerSpellsFrame); PlayerSpellsFrame:SetTab(TALENT_TAB_INDEX) end
+                end
+            end)
+            Update()
         end
-
-        slot:RegisterEvent("PLAYER_TALENT_UPDATE")
-        slot:RegisterEvent("ACTIVE_TALENT_GROUP_CHANGED")
-        slot:RegisterEvent("TRAIT_CONFIG_UPDATED")
-        slot:RegisterEvent("PLAYER_ENTERING_WORLD")
-        slot:SetScript("OnEvent", function() C_Timer.After(0.2, Update) end)
-
-        slot:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:ClearLines()
-            GameTooltip:AddLine("|cff00ffffLeft-click|r to open/close Talents", 0.5, 0.5, 0.5)
-            GameTooltip:Show()
-        end)
-        slot:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
-        MakeClickable(slot, function() 
-            local TALENT_TAB_INDEX = 2 
-            if not PlayerSpellsFrame then TogglePlayerSpellsFrame(TALENT_TAB_INDEX)
-            else
-                if PlayerSpellsFrame:IsShown() and (PlayerSpellsFrame.GetTab and PlayerSpellsFrame:GetTab() == TALENT_TAB_INDEX) then
-                    TogglePlayerSpellsFrame(TALENT_TAB_INDEX)
-                else ShowUIPanel(PlayerSpellsFrame); PlayerSpellsFrame:SetTab(TALENT_TAB_INDEX) end
-            end
-        end)
-        Update()
-    end
-})
+    })
+end
 
 -- 10. VOLUME
 PP:RegisterDatatext("Volume", {
-    OnEnable = function(slot, fontSize, fontType)
+    OnEnable = function(slot, fontSize, fontType, valueColor)
         local text = slot.text or slot:CreateFontString(nil, "OVERLAY", "GameFontNormal")
         slot.text = text
         text:SetPoint("CENTER")
@@ -745,7 +866,10 @@ PP:RegisterDatatext("Volume", {
             local vol = GetVolume()
             local isMuted = GetCVar("Sound_EnableAllSound") == "0"
             if isMuted then text:SetFormattedText("|cffff0000Muted|r")
-            else text:SetFormattedText("Vol: |cffffffff%d%%|r", vol) end
+            else 
+                local hex = GetHexColor(valueColor)
+                text:SetFormattedText("Vol: |c%s%d%%|r", hex, vol) 
+            end
         end
 
         slot:EnableMouseWheel(true)
@@ -772,7 +896,6 @@ PP:RegisterDatatext("Volume", {
                 if SettingsPanel:IsShown() then HideUIPanel(SettingsPanel)
                 else Settings.OpenToCategory(Settings.AUDIO_CATEGORY_ID) end
             elseif button == "RightButton" then
-                -- FIX: ALT+RightClick opens Panel Menu
                  if IsAltKeyDown() then
                     ns.PP:OpenPanelMenu(self:GetParent())
                     return
@@ -824,7 +947,6 @@ PP:RegisterDatatext("Coordinates", {
         end)
         slot:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
-        -- Enable Right Click for menu
         MakeClickable(slot, function() ToggleWorldMap() end)
         Update()
     end,
@@ -833,135 +955,113 @@ PP:RegisterDatatext("Coordinates", {
     end
 })
 
-------------------------------------
--- 12. MYTHIC+ KEY
-------------------------------------
 
--- 1. Color Keys based on level
-local function GetKeyColor(level)
-    if not level or level == 0 then return 0.7, 0.7, 0.7 end
-    if level >= 10 then return 1, 0.5, 0 end        -- Orange (10+ / Portal)
-    if level >= 7 then return 0.64, 0.21, 0.93 end  -- Purple (7-9 / Hero)
-    if level >= 4 then return 0, 0.44, 0.87 end     -- Blue (4-6 / Champion)
-    if level >= 2 then return 0.12, 1, 0 end        -- Green (2-3)
-    return 1, 1, 1                                  -- White (0-1)
-end
+-- 12. MYTHIC+ KEY 
 
--- 2. SEASONAL DUNGEON LIST (Manual Update)
--- Map the FULL name (exactly as it appears in-game) to your preferred SHORT name.
-local nameMap = {
-    -- Midnight Season 1
-    ["Magister's Terrace"]      = "Terrace",
-    ["Maisara Caverns"]         = "Caverns",
-    ["Nexus-Point Xenas"]       = "Xenas",
-    ["Windrunner Spire"]        = "Spire",
-    ["Algeth'ar Academy"]       = "Academy",
-    ["Seat of the Triumvirate"] = "Seat",
-    ["Skyreach"]                = "Skyreach",
-    ["Pit of Saron"]            = "Pit",
+if C_MythicPlus then 
 
-    -- Current Season (Retained)
-    ["Eco-Dome Aldani"]             = "Ecodome",
-    ["Tazavesh: Soleah's Gambit"]   = "Gambit",
-    ["Priory of the Sacred Flame"]  = "Priory",
-    ["Operation Floodgate"]         = "Floodgate",
-    ["Halls of Atonement"]          = "Halls",
-    ["Ara'kara, City of Echoes"]    = "Ara-Kara", -- User spelling
-    ["Ara-Kara, City of Echoes"]    = "Ara-Kara", -- Standard spelling fallback
-    ["Tazavesh: Streets of Wonder"] = "Streets",
-    ["The Dawnbreaker"]             = "Dawn",
-}
-
-local function GetShortDungeonName(mapID)
-    local name = C_ChallengeMode.GetMapUIInfo(mapID)
-    if not name then return "?" end
-    
-    -- Priority 1: Check the manual map
-    if nameMap[name] then 
-        return nameMap[name] 
+    local function GetKeyColor(level)
+        if not level or level == 0 then return 0.7, 0.7, 0.7 end
+        if level >= 10 then return 1, 0.5, 0 end        -- Orange
+        if level >= 7 then return 0.64, 0.21, 0.93 end  -- Purple
+        if level >= 4 then return 0, 0.44, 0.87 end     -- Blue
+        if level >= 2 then return 0.12, 1, 0 end        -- Green
+        return 1, 1, 1
     end
 
-    -- Priority 2: Fallback logic (Safe defaults if name isn't in the list)
-    -- If it has a colon (Mega Dungeon), take the part AFTER the colon
-    if name:find(":") then
-        return name:match(":%s*(.+)") -- "Tazavesh: Streets" -> "Streets"
+    local nameMap = {
+        ["Magister's Terrace"] = "Terrace",
+        ["Maisara Caverns"] = "Caverns",
+        ["Nexus-Point Xenas"] = "Xenas",
+        ["Windrunner Spire"] = "Spire",
+        ["Algeth'ar Academy"] = "Academy",
+        ["Seat of the Triumvirate"] = "Seat",
+        ["Skyreach"] = "Skyreach",
+        ["Pit of Saron"] = "Pit",
+        ["Eco-Dome Aldani"] = "Ecodome",
+        ["Tazavesh: Soleah's Gambit"] = "Gambit",
+        ["Priory of the Sacred Flame"] = "Priory",
+        ["Operation Floodgate"] = "Floodgate",
+        ["Halls of Atonement"] = "Halls",
+        ["Ara'kara, City of Echoes"] = "Ara-Kara",
+        ["Ara-Kara, City of Echoes"] = "Ara-Kara",
+        ["Tazavesh: Streets of Wonder"] = "Streets",
+        ["The Dawnbreaker"] = "Dawn",
+    }
+
+    local function GetShortDungeonName(mapID)
+        local name = C_ChallengeMode.GetMapUIInfo(mapID)
+        if not name then return "?" end
+        if nameMap[name] then return nameMap[name] end
+        if name:find(":") then return name:match(":%s*(.+)") end
+        local clean = name:gsub("^The ", "")
+        return clean:match("^(%S+)") or clean
     end
-    
-    -- If it has no colon, remove "The " and take the first word
-    local clean = name:gsub("^The ", "")
-    return clean:match("^(%S+)") or clean
-end
 
-PP:RegisterDatatext("Mythic Key", {
-    OnEnable = function(slot, fontSize, fontType, valueColor)
-        local text = slot.text or slot:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        slot.text = text
-        text:SetPoint("CENTER")
-        ApplySettings(text, fontSize, fontType)
+    PP:RegisterDatatext("Mythic Key", {
+        OnEnable = function(slot, fontSize, fontType, valueColor)
+            local text = slot.text or slot:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+            slot.text = text
+            text:SetPoint("CENTER")
+            ApplySettings(text, fontSize, fontType)
 
-        local function Update()
-            local keystoneLevel = C_MythicPlus.GetOwnedKeystoneLevel()
-            local mapID = C_MythicPlus.GetOwnedKeystoneChallengeMapID()
+            local function Update()
+                local keystoneLevel = C_MythicPlus.GetOwnedKeystoneLevel()
+                local mapID = C_MythicPlus.GetOwnedKeystoneChallengeMapID()
 
-            if keystoneLevel and keystoneLevel > 0 and mapID then
-                local shortName = GetShortDungeonName(mapID)
-                local kr, kg, kb = GetKeyColor(keystoneLevel)
-                local hex = GetHexColor(valueColor)
-                
-                -- Format: "+10 Terrace" (Level colored, Name in standard color)
-                text:SetFormattedText("|cff%02x%02x%02x+%d|r |c%s%s|r", kr*255, kg*255, kb*255, keystoneLevel, hex, shortName)
-            else
-                local hex = GetHexColor(valueColor)
-                text:SetFormattedText("|c%sNo Key|r", hex)
-            end
-        end
-
-        -- Events
-        slot:RegisterEvent("PLAYER_ENTERING_WORLD")
-        slot:RegisterEvent("CHALLENGE_MODE_MAPS_UPDATE")
-        slot:RegisterEvent("BAG_UPDATE")
-        slot:SetScript("OnEvent", Update)
-
-        -- Tooltip
-        slot:SetScript("OnEnter", function(self)
-            GameTooltip:SetOwner(self, "ANCHOR_TOP")
-            GameTooltip:ClearLines()
-            GameTooltip:AddLine("Mythic+ Keystone", 1, 1, 1)
-            GameTooltip:AddLine(" ")
-
-            local keystoneLevel = C_MythicPlus.GetOwnedKeystoneLevel()
-            local mapID = C_MythicPlus.GetOwnedKeystoneChallengeMapID()
-
-            if keystoneLevel and keystoneLevel > 0 and mapID then
-                local name = C_ChallengeMode.GetMapUIInfo(mapID)
-                local r, g, b = GetKeyColor(keystoneLevel)
-                -- Show full name in tooltip
-                GameTooltip:AddDoubleLine("Current Key:", string.format("|cff%02x%02x%02x+%d %s|r", r*255, g*255, b*255, keystoneLevel, name or "Unknown"), 1, 1, 1)
-            else
-                GameTooltip:AddLine("No keystone in bags", 0.7, 0.7, 0.7)
-            end
-
-            GameTooltip:AddLine(" ")
-            GameTooltip:AddLine("|cff00ffffLeft-click|r to open Premade Groups", 0.5, 0.5, 0.5)
-            GameTooltip:AddLine("|cff00ffffRight-Click|r for Panel Options", 0.5, 0.5, 0.5)
-            GameTooltip:Show()
-        end)
-        slot:SetScript("OnLeave", function() GameTooltip:Hide() end)
-
-        -- Click Handler
-        slot:EnableMouse(true)
-        slot:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-        slot:SetScript("OnClick", function(self, button)
-            if button == "LeftButton" then
-                if not InCombatLockdown() then
-                    -- FIX: Open "Premade Groups" (LFGListPVEStub) instead of "Dungeon Finder" (LFDParentFrame)
-                    PVEFrame_ToggleFrame("GroupFinderFrame", LFGListPVEStub)
+                if keystoneLevel and keystoneLevel > 0 and mapID then
+                    local shortName = GetShortDungeonName(mapID)
+                    local kr, kg, kb = GetKeyColor(keystoneLevel)
+                    local hex = GetHexColor(valueColor)
+                    text:SetFormattedText("|cff%02x%02x%02x+%d|r |c%s%s|r", kr*255, kg*255, kb*255, keystoneLevel, hex, shortName)
+                else
+                    local hex = GetHexColor(valueColor)
+                    text:SetFormattedText("|c%sNo Key|r", hex)
                 end
-            elseif button == "RightButton" then
-                 ns.PP:OpenPanelMenu(self:GetParent())
             end
-        end)
 
-        Update()
-    end
-})
+            slot:RegisterEvent("PLAYER_ENTERING_WORLD")
+            slot:RegisterEvent("CHALLENGE_MODE_MAPS_UPDATE")
+            slot:RegisterEvent("BAG_UPDATE")
+            slot:SetScript("OnEvent", Update)
+
+            slot:SetScript("OnEnter", function(self)
+                GameTooltip:SetOwner(self, "ANCHOR_TOP")
+                GameTooltip:ClearLines()
+                GameTooltip:AddLine("Mythic+ Keystone", 1, 1, 1)
+                GameTooltip:AddLine(" ")
+
+                local keystoneLevel = C_MythicPlus.GetOwnedKeystoneLevel()
+                local mapID = C_MythicPlus.GetOwnedKeystoneChallengeMapID()
+
+                if keystoneLevel and keystoneLevel > 0 and mapID then
+                    local name = C_ChallengeMode.GetMapUIInfo(mapID)
+                    local r, g, b = GetKeyColor(keystoneLevel)
+                    GameTooltip:AddDoubleLine("Current Key:", string.format("|cff%02x%02x%02x+%d %s|r", r*255, g*255, b*255, keystoneLevel, name or "Unknown"), 1, 1, 1)
+                else
+                    GameTooltip:AddLine("No keystone in bags", 0.7, 0.7, 0.7)
+                end
+
+                GameTooltip:AddLine(" ")
+                GameTooltip:AddLine("|cff00ffffLeft-click|r to open Premade Groups", 0.5, 0.5, 0.5)
+                GameTooltip:AddLine("|cff00ffffRight-Click|r for Panel Options", 0.5, 0.5, 0.5)
+                GameTooltip:Show()
+            end)
+            slot:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+            slot:EnableMouse(true)
+            slot:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+            slot:SetScript("OnClick", function(self, button)
+                if button == "LeftButton" then
+                    if not InCombatLockdown() then
+                        PVEFrame_ToggleFrame("GroupFinderFrame", LFGListPVEStub)
+                    end
+                elseif button == "RightButton" then
+                     ns.PP:OpenPanelMenu(self:GetParent())
+                end
+            end)
+
+            Update()
+        end
+    })
+end
